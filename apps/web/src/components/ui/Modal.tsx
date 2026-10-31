@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { clsx } from "clsx";
 import { useTheme } from "../../context/ThemeContext";
@@ -31,6 +31,8 @@ export const Modal: React.FC<ModalProps> = ({
 }) => {
   const { prefersReducedMotion } = useTheme();
 
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isOpen) {
@@ -38,12 +40,14 @@ export const Modal: React.FC<ModalProps> = ({
       }
     };
     if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement;
       document.body.style.overflow = "hidden";
       window.addEventListener("keydown", handleKeyDown);
     }
     return () => {
       document.body.style.overflow = "unset";
       window.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement.current?.focus();
     };
   }, [isOpen, onClose]);
 

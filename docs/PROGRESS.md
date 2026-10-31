@@ -658,6 +658,31 @@ All 55 end-to-end browser verification runs executed cleanly against live in-mem
      - Authored comprehensive project report covering Executive Summary, Monorepo Topology, Database Schema & State Machines, Cryptographic Security, Requirements Traceability (all 35 requirements marked with statuses and reasons), Test Execution (152 tests, 14-step E2E flow), UI Gallery, and Deployment Strategy.
 - **Rationale**: Provides an exhaustive, transparent, and submission-ready engineering portfolio that satisfies every requirement of the VorldX assignment brief with zero fabricated claims.
 
+---
+
+### DEC-042: Web Authentication Modernization: Email + Password & Staff Invitation Architecture
+
+- **Decision**:
+  1. **Web App Authentication Overhaul**: Replaced the staff OTP / SMS mobile login flow on the HR/Admin web portal with secure Email + Password authentication, while preserving the Employee Mobile App registration flow completely untouched.
+  2. **Security Model A (Administrative Staff Invitations)**:
+     - The first admin is established via database seed (`admin@vorldx.demo`).
+     - Subsequent HR and Admin accounts are created strictly via administrative invitation (`POST /api/auth/invite`) with single-use, 48-hour expiring cryptographic token hashes.
+     - Open self-signup (`POST /api/auth/signup`) strictly creates unverified `EMPLOYEE` accounts with `PENDING_VERIFICATION` status and dispatches a single-use email verification link. Role escalation attempts via open signup are rejected.
+  3. **Pluggable Mail Adapter**: Introduced `IMailAdapter` with `ConsoleMailAdapter` (in-memory queue + console delivery for test and development) and `SmtpMailAdapter` for production environments.
+  4. **Cryptographic Protection & User Enumeration Defense**:
+     - Passwords hashed with bcrypt (salt rounds = 10) and enforced with `isPasswordStrong` (minimum 8 characters, uppercase, lowercase, number/symbol).
+     - Identical generic error message `"Invalid email or password"` returned for both incorrect passwords and non-existent emails.
+     - Single-use, expiring SHA-256 hashed tokens for email verification (`POST /api/auth/verify-email`), password resets (`POST /api/auth/reset-password`), and staff invitations.
+     - Account lockout after 5 consecutive failed login attempts (15-minute cooldown, `423 ERR_ACCOUNT_LOCKED`).
+  5. **Decommissioning Legacy Staff OTP**: Legacy routes `/api/auth/staff/otp-start` and `/api/auth/staff/otp-verify` removed and return `404 Not Found`.
+  6. **Web Client Modernization**:
+     - Modernized `LoginPage.tsx` with email/password inputs, show/hide password toggle, remember me, forgot password link, signup link, double-submit prevention, and demo account fill buttons.
+     - Created `SignupPage.tsx` supporting self-signup and staff invitation acceptance (`?invite=...`) with live password strength checklist.
+     - Created `ForgotPasswordPage.tsx` with anti-enumeration response and `ResetPasswordPage.tsx` with single-use token invalidation.
+     - Created `VerifyEmailPage.tsx` with auto-verification on mount and resend functionality.
+- **Rationale**: Elevates corporate security standards for the management portal, eliminates reliance on SMS delivery for web staff, and provides complete role governance without breaking employee mobile workflows.
+
+
 
 
 

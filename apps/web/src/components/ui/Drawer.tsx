@@ -32,6 +32,7 @@ export const Drawer: React.FC<DrawerProps> = ({
   const { prefersReducedMotion } = useTheme();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -40,6 +41,7 @@ export const Drawer: React.FC<DrawerProps> = ({
       }
     };
     if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement;
       document.body.style.overflow = "hidden";
       window.addEventListener("keydown", handleKeyDown);
       setTimeout(() => closeBtnRef.current?.focus(), 50);
@@ -47,6 +49,7 @@ export const Drawer: React.FC<DrawerProps> = ({
     return () => {
       document.body.style.overflow = "unset";
       window.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement.current?.focus();
     };
   }, [isOpen, onClose]);
 

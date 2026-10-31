@@ -99,3 +99,73 @@ export const AuthUserSchema = z.object({
 });
 
 export type AuthUser = z.infer<typeof AuthUserSchema>;
+
+/**
+ * Validates password strength:
+ * - Minimum 8 characters, maximum 128 characters
+ * - At least one uppercase letter
+ * - At least one lowercase letter
+ * - At least one digit or special character
+ */
+export function isPasswordStrong(password: string): boolean {
+  if (!password || password.length < 8) return false;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasLower = /[a-z]/.test(password);
+  const hasNumberOrSymbol = /[\d!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password);
+  return hasUpper && hasLower && hasNumberOrSymbol;
+}
+
+export const SignupRequestSchema = z.object({
+  email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(128, "Password cannot exceed 128 characters")
+    .refine(isPasswordStrong, {
+      message: "Password must contain at least one uppercase letter, one lowercase letter, and one number or special character",
+    }),
+  name: z.string().trim().min(2, "Full name must be at least 2 characters").max(100),
+  inviteToken: z.string().trim().optional(),
+});
+export type SignupRequest = z.infer<typeof SignupRequestSchema>;
+
+export const ForgotPasswordRequestSchema = z.object({
+  email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+});
+export type ForgotPasswordRequest = z.infer<typeof ForgotPasswordRequestSchema>;
+
+export const ResetPasswordRequestSchema = z.object({
+  token: z.string().trim().min(1, "Reset token is required"),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(128, "Password cannot exceed 128 characters")
+    .refine(isPasswordStrong, {
+      message: "Password must contain at least one uppercase letter, one lowercase letter, and one number or special character",
+    }),
+});
+export type ResetPasswordRequest = z.infer<typeof ResetPasswordRequestSchema>;
+
+export const VerifyEmailRequestSchema = z.object({
+  token: z.string().trim().min(1, "Verification token is required"),
+});
+export type VerifyEmailRequest = z.infer<typeof VerifyEmailRequestSchema>;
+
+export const ResendVerificationRequestSchema = z.object({
+  email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+});
+export type ResendVerificationRequest = z.infer<typeof ResendVerificationRequestSchema>;
+
+export const StaffInviteRequestSchema = z.object({
+  email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+  role: z.enum([UserRole.HR, UserRole.ADMIN, UserRole.HR_ADMIN]).default(UserRole.HR),
+  name: z.string().trim().min(2, "Name must be at least 2 characters").max(100).optional(),
+  department: z.string().trim().max(100).optional(),
+  designation: z.string().trim().max(100).optional(),
+});
+export type StaffInviteRequest = z.infer<typeof StaffInviteRequestSchema>;
+
+export const VerifyInviteRequestSchema = z.object({
+  token: z.string().trim().min(1, "Invitation token is required"),
+});
+export type VerifyInviteRequest = z.infer<typeof VerifyInviteRequestSchema>;

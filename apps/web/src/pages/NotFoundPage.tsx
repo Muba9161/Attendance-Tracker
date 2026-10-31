@@ -6,11 +6,11 @@ import { Button } from "../components/ui/Button";
 export const NotFoundPage: React.FC = () => {
   return (
     <div className="min-h-[70vh] flex flex-col items-center justify-center text-center p-6">
-      <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center mb-4 border border-slate-200">
+      <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center mb-4 border border-slate-200 dark:border-slate-700 shadow-xs">
         <HelpCircle className="w-8 h-8" />
       </div>
-      <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Page Not Found</h1>
-      <p className="text-sm text-slate-600 max-w-md mt-2">
+      <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Page Not Found</h1>
+      <p className="text-sm text-slate-600 dark:text-slate-300 max-w-md mt-2">
         The route you requested could not be located on the VorldX portal.
       </p>
       <div className="mt-6">

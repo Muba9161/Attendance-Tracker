@@ -9,6 +9,10 @@ import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { RoleGuard } from "./routes/RoleGuard";
 import { AppShell } from "./components/layout/AppShell";
 import { LoginPage } from "./pages/LoginPage";
+import { SignupPage } from "./pages/SignupPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { AttendanceLedgerPage } from "./pages/AttendanceLedgerPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -45,8 +49,12 @@ export const App: React.FC = () => {
           <SocketProvider>
             <BrowserRouter>
               <Routes>
-                {/* Public Authentication Route */}
+                {/* Public Authentication Routes */}
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
 
                 {/* Protected Administrative Application Shell */}
                 <Route element={<ProtectedRoute />}>

@@ -2128,34 +2128,138 @@ Guarded by `requireFeatureFlag("announcements")`. When the flag is disabled, all
 - **Socket Event Dispatched**: `enquiry.assigned`
 - **In-App Notification**: Sent to new assignee.
 
-### 7.5 Staff Mobile OTP & Device Security API
+### 7.5 Staff Authentication, Invitations & Session Security API
 
-#### 7.5.1 `POST /api/auth/staff/otp-start`
+> **Notice**: Legacy Staff OTP endpoints (`/api/auth/staff/otp-start` and `/api/auth/staff/otp-verify`) have been decommissioned and now return `404 Not Found`. Web authentication is strictly managed via email + password with administrative invitations and email verification.
+
+#### 7.5.1 `POST /api/auth/signup`
 - **Role**: `Public` (Rate-limited)
-- **Description**: Generates a 6-digit OTP sent via SMS to verified staff mobile numbers for passwordless admin/HR login.
-- **Request Body**: `{ "mobileNumber": "+919876543210", "purpose": "LOGIN" }`
+- **Description**: Self-signup for employees or invite acceptance for staff. Passwords must be at least 8 characters and contain uppercase, lowercase, and a number or symbol. If `inviteToken` is provided and valid, grants the assigned HR or Admin role and auto-activates the account. Otherwise, creates an account with role `EMPLOYEE` in `PENDING_VERIFICATION` state and dispatches an email verification link.
+- **Request Body**:
+  ```json
+  {
+    "name": "Jane Doe",
+    "email": "jane.doe@vorldx.demo",
+    "password": "SecurePassword123!",
+    "inviteToken": "optional-token-hex"
+  }
+  ```
+- **Response (201 Created)**:
+  ```json
+  {
+    "success": true,
+    "message": "Account created! A verification link has been sent to your email.",
+    "requiresEmailVerification": true,
+    "user": {
+      "_id": "6714a8b...",
+      "email": "jane.doe@vorldx.demo",
+      "employeeId": "EMP-026",
+      "role": "EMPLOYEE",
+      "status": "PENDING_VERIFICATION"
+    }
+  }
+  ```
+
+#### 7.5.2 `POST /api/auth/verify-email`
+- **Role**: `Public` (Rate-limited)
+- **Description**: Validates a single-use email verification token hash and activates the user account.
+- **Request Body**: `{ "token": "raw-token-hex-32" }`
 - **Response (200 OK)**:
   ```json
   {
     "success": true,
-    "message": "Security code dispatched via SMS",
-    "expiresInSeconds": 300
+    "message": "Email verified successfully! You may now sign in."
   }
   ```
 
-#### 7.5.2 `POST /api/auth/staff/otp-verify`
-- **Role**: `Public`
+#### 7.5.3 `POST /api/auth/resend-verification`
+- **Role**: `Public` (Rate-limited, Anti-enumeration)
+- **Description**: Dispatches a new single-use 24-hour verification token to an unverified email address. Always returns a generic success response to prevent email enumeration.
+- **Request Body**: `{ "email": "jane.doe@vorldx.demo" }`
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "message": "If an unverified account exists with this email address, a verification link has been dispatched."
+  }
+  ```
+
+#### 7.5.4 `POST /api/auth/forgot-password`
+- **Role**: `Public` (Rate-limited, Anti-enumeration)
+- **Description**: Dispatches a single-use 1-hour password reset link. Returns generic response regardless of whether the email exists.
+- **Request Body**: `{ "email": "jane.doe@vorldx.demo" }`
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "message": "If that email address is registered, a password reset link has been dispatched."
+  }
+  ```
+
+#### 7.5.5 `POST /api/auth/reset-password`
+- **Role**: `Public` (Rate-limited)
+- **Description**: Resets password using a single-use reset token hash with strength validation. Invalidates all active sessions.
+- **Request Body**: `{ "token": "raw-token-hex-32", "password": "NewSecurePassword123!" }`
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "message": "Password updated successfully. You may now sign in with your new password."
+  }
+  ```
+
+#### 7.5.6 `POST /api/auth/invite`
+- **Role**: `Protected` (`ADMIN` only)
+- **Description**: Issues an administrative staff invitation with single-use 48-hour expiring token for `HR` or `ADMIN` role.
 - **Request Body**:
   ```json
   {
-    "mobileNumber": "+919876543210",
-    "otp": "849201",
-    "deviceFingerprint": "hw_mac_fp_88291a",
-    "deviceName": "Kirtee MacBook Pro",
-    "trustDevice": true
+    "email": "sunita.roy@vorldx.demo",
+    "role": "HR",
+    "name": "Sunita Roy",
+    "department": "Human Resources",
+    "designation": "HR Specialist"
   }
   ```
-- **Response (200 OK)**: Returns JWT access token, refresh token, and registers device in `TrustedDevice`.
+- **Response (201 Created)**:
+  ```json
+  {
+    "success": true,
+    "message": "Invitation successfully sent to sunita.roy@vorldx.demo.",
+    "email": "sunita.roy@vorldx.demo",
+    "role": "HR",
+    "expiresInHours": 48
+  }
+  ```
+
+#### 7.5.7 `GET /api/auth/verify-invite`
+- **Role**: `Public`
+- **Query Params**: `token=raw-token-hex-32`
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "valid": true,
+    "email": "sunita.roy@vorldx.demo",
+    "role": "HR",
+    "name": "Sunita Roy",
+    "department": "Human Resources",
+    "designation": "HR Specialist"
+  }
+  ```
+
+#### 7.5.8 `GET /api/auth/staff/sessions`
+- **Role**: `Protected` (`HR`, `ADMIN`, `HR_ADMIN`)
+- **Description**: Lists active sessions for the current staff user.
+- **Response (200 OK)**: Array of active `StaffSession` objects with IP, user agent, expiration, and current session flag.
+
+#### 7.5.9 `DELETE /api/auth/staff/sessions/:id`
+- **Role**: `Protected` (`HR`, `ADMIN`, `HR_ADMIN`)
+- **Description**: Revokes a specific staff session.
+
+#### 7.5.10 `POST /api/auth/staff/force-logout/:userId`
+- **Role**: `Protected` (`ADMIN` only)
+- **Description**: Administrative termination of all active sessions and refresh tokens for a target staff user. Emits `staff:force_logout` real-time event.
 
 ---
 

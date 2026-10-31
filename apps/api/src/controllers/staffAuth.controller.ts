@@ -3,64 +3,6 @@ import { staffAuthService } from "../services/staffAuth.service";
 
 export class StaffAuthController {
   /**
-   * POST /api/auth/staff/otp-start
-   */
-  public async requestOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const ipAddress = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
-      const result = await staffAuthService.requestStaffOtp({
-        mobileNumber: req.body.mobileNumber,
-        purpose: req.body.purpose,
-        password: req.body.password,
-        deviceFingerprint: req.body.deviceFingerprint,
-        ipAddress,
-      });
-
-      res.status(200).json(result);
-    } catch (err) {
-      next(err);
-    }
-  }
-
-  /**
-   * POST /api/auth/staff/otp-verify
-   */
-  public async verifyOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const ipAddress = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
-      const userAgent = (req.headers["user-agent"] as string) || "Unknown";
-
-      const result = await staffAuthService.verifyStaffOtp({
-        mobileNumber: req.body.mobileNumber,
-        otp: req.body.otp,
-        purpose: req.body.purpose,
-        deviceFingerprint: req.body.deviceFingerprint,
-        deviceName: req.body.deviceName,
-        platform: req.body.platform,
-        rememberDevice: req.body.rememberDevice ?? req.body.trustDevice ?? false,
-        ipAddress,
-        userAgent,
-      });
-
-      // Optionally set cookie
-      res.cookie("accessToken", result.accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 15 * 60 * 1000,
-      });
-
-      res.status(200).json({
-        success: true,
-        message: "Staff authentication verified successfully",
-        data: result,
-      });
-    } catch (err) {
-      next(err);
-    }
-  }
-
-  /**
    * GET /api/auth/staff/sessions
    */
   public async listSessions(req: Request, res: Response, next: NextFunction): Promise<void> {

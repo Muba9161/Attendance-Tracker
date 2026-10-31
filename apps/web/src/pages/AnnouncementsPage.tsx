@@ -444,7 +444,7 @@ export const AnnouncementsPage: React.FC = () => {
             className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
               sourceTab === "all"
                 ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-cyan-400 shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
             }`}
           >
             All Announcements
@@ -458,7 +458,7 @@ export const AnnouncementsPage: React.FC = () => {
             className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
               sourceTab === "manual"
                 ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-cyan-400 shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
             }`}
           >
             Manual ({adminData?.data?.filter((a) => a.source === "manual").length ?? "..."})
@@ -472,7 +472,7 @@ export const AnnouncementsPage: React.FC = () => {
             className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1.5 ${
               sourceTab === "auto"
                 ? "bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
@@ -1080,7 +1080,7 @@ export const AnnouncementsPage: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* Template Selector List */}
-            <div className="space-y-1 md:border-r md:border-slate-200 dark:md:border-slate-800 md:pr-3">
+            <div className="space-y-1 md:border-r md:border-slate-200 md:dark:border-slate-800 md:pr-3">
               {templates.map((tpl) => (
                 <button
                   key={tpl.key}
