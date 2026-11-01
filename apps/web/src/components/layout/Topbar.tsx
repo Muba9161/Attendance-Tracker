@@ -9,7 +9,6 @@ import {
   User,
   Sun,
   Moon,
-  Palette,
   Bell,
   Calendar,
   ChevronLeft,
@@ -54,7 +53,6 @@ const routeNameMap: Record<string, string> = {
   security: "Security & Sessions",
   releases: "App Releases & OTA",
   "audit-logs": "Audit Trail",
-  "design-system": "Design System Showcase",
   "three-d": "3D Floor View",
   unauthorized: "Unauthorized Access",
 };
@@ -460,14 +458,6 @@ export const Topbar: React.FC<TopbarProps> = ({
                   <span>Security & Active Sessions</span>
                 </Link>
 
-                <Link
-                  to="/design-system"
-                  onClick={() => setIsProfileOpen(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                >
-                  <Palette className="w-4 h-4 text-indigo-400" />
-                  <span>Design System Showcase</span>
-                </Link>
               </div>
 
               <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
