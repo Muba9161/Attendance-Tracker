@@ -282,12 +282,26 @@ export class EnquiryService {
       filter.employeeUser = new Types.ObjectId(userId);
     } else {
       if (query.assigneeId) {
-        filter.assignee = new Types.ObjectId(query.assigneeId);
+        const val = query.assigneeId.trim().toUpperCase();
+        if (val === "UNASSIGNED" || val === "NONE" || val === "NULL") {
+          filter.assignee = null;
+        } else if (Types.ObjectId.isValid(query.assigneeId)) {
+          filter.assignee = new Types.ObjectId(query.assigneeId);
+        }
       }
     }
 
     if (query.status) {
-      filter.status = query.status.toUpperCase();
+      const s = query.status.trim().toUpperCase();
+      if (s === "ACTIVE") {
+        filter.status = { $in: ["OPEN", "IN_PROGRESS"] };
+      } else if (s === "RESOLVED_CLOSED") {
+        filter.status = { $in: ["RESOLVED", "CLOSED"] };
+      } else if (s.includes(",")) {
+        filter.status = { $in: s.split(",").map((x) => x.trim()) };
+      } else {
+        filter.status = s;
+      }
     }
 
     if (query.category) {
@@ -295,7 +309,14 @@ export class EnquiryService {
     }
 
     if (query.priority) {
-      filter.priority = query.priority.toUpperCase();
+      const p = query.priority.trim().toUpperCase();
+      if (p === "HIGH_URGENT") {
+        filter.priority = { $in: ["HIGH", "URGENT"] };
+      } else if (p.includes(",")) {
+        filter.priority = { $in: p.split(",").map((x) => x.trim()) };
+      } else {
+        filter.priority = p;
+      }
     }
 
     if (query.search) {
@@ -326,6 +347,130 @@ export class EnquiryService {
       page,
       limit,
       totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
+
+  /**
+   * Retrieves enquiry badge and tab counts scoped by user role.
+   * Scoped to the caller: employees see counts of their own tickets; HR/admin see all.
+   */
+  public async getEnquiryCounts(
+    userId: string,
+    userRole: string
+  ): Promise<{
+    all: number;
+    total: number;
+    active: number;
+    open: number;
+    inProgress: number;
+    resolved: number;
+    resolvedOnly: number;
+    closed: number;
+    myTickets: number;
+    unassigned: number;
+    highPriority: number;
+    byCategory: Record<string, number>;
+    byStatus: Record<string, number>;
+    byPriority: Record<string, number>;
+  }> {
+    const isHrOrAdmin = userRole === UserRole.HR || userRole === UserRole.ADMIN;
+    const baseMatch: Record<string, any> = {};
+
+    if (!isHrOrAdmin) {
+      baseMatch.employeeUser = new Types.ObjectId(userId);
+    }
+
+    const userObjectId = new Types.ObjectId(userId);
+
+    const [result] = await Enquiry.aggregate([
+      { $match: baseMatch },
+      {
+        $facet: {
+          all: [{ $count: "count" }],
+          active: [
+            { $match: { status: { $in: ["OPEN", "IN_PROGRESS"] } } },
+            { $count: "count" },
+          ],
+          open: [
+            { $match: { status: "OPEN" } },
+            { $count: "count" },
+          ],
+          inProgress: [
+            { $match: { status: "IN_PROGRESS" } },
+            { $count: "count" },
+          ],
+          resolved: [
+            { $match: { status: { $in: ["RESOLVED", "CLOSED"] } } },
+            { $count: "count" },
+          ],
+          resolvedOnly: [
+            { $match: { status: "RESOLVED" } },
+            { $count: "count" },
+          ],
+          closed: [
+            { $match: { status: "CLOSED" } },
+            { $count: "count" },
+          ],
+          myTickets: [
+            { $match: { assignee: userObjectId } },
+            { $count: "count" },
+          ],
+          unassigned: [
+            { $match: { $or: [{ assignee: null }, { assignee: { $exists: false } }] } },
+            { $count: "count" },
+          ],
+          highPriority: [
+            { $match: { priority: { $in: ["HIGH", "URGENT"] } } },
+            { $count: "count" },
+          ],
+          byCategory: [
+            { $group: { _id: "$category", count: { $sum: 1 } } },
+          ],
+          byStatus: [
+            { $group: { _id: "$status", count: { $sum: 1 } } },
+          ],
+          byPriority: [
+            { $group: { _id: "$priority", count: { $sum: 1 } } },
+          ],
+        },
+      },
+    ]);
+
+    const getCount = (arr?: Array<{ count: number }>) => arr?.[0]?.count ?? 0;
+
+    return {
+      all: getCount(result?.all),
+      total: getCount(result?.all),
+      active: getCount(result?.active),
+      open: getCount(result?.open),
+      inProgress: getCount(result?.inProgress),
+      resolved: getCount(result?.resolved),
+      resolvedOnly: getCount(result?.resolvedOnly),
+      closed: getCount(result?.closed),
+      myTickets: getCount(result?.myTickets),
+      unassigned: getCount(result?.unassigned),
+      highPriority: getCount(result?.highPriority),
+      byCategory: (result?.byCategory || []).reduce(
+        (acc: Record<string, number>, curr: { _id: string; count: number }) => {
+          if (curr._id) acc[curr._id] = curr.count;
+          return acc;
+        },
+        {}
+      ),
+      byStatus: (result?.byStatus || []).reduce(
+        (acc: Record<string, number>, curr: { _id: string; count: number }) => {
+          if (curr._id) acc[curr._id] = curr.count;
+          return acc;
+        },
+        {}
+      ),
+      byPriority: (result?.byPriority || []).reduce(
+        (acc: Record<string, number>, curr: { _id: string; count: number }) => {
+          if (curr._id) acc[curr._id] = curr.count;
+          return acc;
+        },
+        {}
+      ),
     };
   }
 

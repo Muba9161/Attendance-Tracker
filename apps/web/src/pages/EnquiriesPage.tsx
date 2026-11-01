@@ -18,6 +18,7 @@ import { useToast } from "../components/ui/Toast";
 import {
   useEnquiries,
   useEnquiryDetails,
+  useEnquiryCounts,
   useSendEnquiryMessage,
   useUpdateEnquiryStatus,
   useAssignEnquiry,
@@ -99,7 +100,7 @@ export const EnquiriesPage: React.FC = () => {
     // Apply Saved Views shortcuts
     switch (activeView) {
       case "ACTIVE":
-        if (statusFilter === "ALL") filters.status = "OPEN";
+        if (statusFilter === "ALL") filters.status = "OPEN,IN_PROGRESS";
         break;
       case "MY_TICKETS":
         if (user?.id) filters.assigneeId = user.id;
@@ -108,10 +109,10 @@ export const EnquiriesPage: React.FC = () => {
         filters.assigneeId = "UNASSIGNED";
         break;
       case "HIGH_PRIORITY":
-        filters.priority = "HIGH";
+        filters.priority = "HIGH,URGENT";
         break;
       case "RESOLVED":
-        filters.status = "RESOLVED";
+        filters.status = "RESOLVED,CLOSED";
         break;
       case "ALL":
       default:
@@ -123,6 +124,8 @@ export const EnquiriesPage: React.FC = () => {
 
   // Queries
   const { data: enquiriesData, isLoading, isError, refetch } = useEnquiries(derivedFilters);
+  const { data: countsData, refetch: refetchCounts } = useEnquiryCounts();
+  const counts = countsData?.data;
   const { data: activeTicketData, isLoading: isTicketLoading } = useEnquiryDetails(activeTicketId);
   const { data: employeesData } = useEmployees({ limit: 100 });
 
@@ -382,7 +385,15 @@ export const EnquiriesPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()} isLoading={isLoading}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              refetch();
+              refetchCounts();
+            }}
+            isLoading={isLoading}
+          >
             <RefreshCw className="w-4 h-4 mr-1.5" />
             Refresh
           </Button>
@@ -393,25 +404,25 @@ export const EnquiriesPage: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Enquiries"
-          value={totalCount}
+          value={counts ? counts.total : totalCount}
           color="blue"
           icon={LifeBuoy}
         />
         <StatCard
           label="Active & Open"
-          value={enquiries.filter((t) => t.status === "OPEN" || t.status === "IN_PROGRESS").length}
+          value={counts ? counts.active : enquiries.filter((t) => t.status === "OPEN" || t.status === "IN_PROGRESS").length}
           color="amber"
           icon={Clock}
         />
         <StatCard
           label="Assigned to Me"
-          value={enquiries.filter((t) => t.assignee?._id === user?.id).length}
+          value={counts ? counts.myTickets : enquiries.filter((t) => t.assignee?._id === user?.id).length}
           color="default"
           icon={UserCheck}
         />
         <StatCard
           label="Resolved / Closed"
-          value={enquiries.filter((t) => t.status === "RESOLVED" || t.status === "CLOSED").length}
+          value={counts ? counts.resolved : enquiries.filter((t) => t.status === "RESOLVED" || t.status === "CLOSED").length}
           color="emerald"
           icon={CheckCircle2}
         />
@@ -420,12 +431,12 @@ export const EnquiriesPage: React.FC = () => {
       {/* 3. Saved Views & Quick Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
         {[
-          { key: "ACTIVE", label: "Open & Active" },
-          { key: "ALL", label: "All Tickets" },
-          { key: "MY_TICKETS", label: "Assigned to Me" },
-          { key: "UNASSIGNED", label: "Unassigned" },
-          { key: "HIGH_PRIORITY", label: "High & Urgent" },
-          { key: "RESOLVED", label: "Resolved / Closed" },
+          { key: "ACTIVE", label: "Open & Active", count: counts?.active },
+          { key: "ALL", label: "All Tickets", count: counts?.all },
+          { key: "MY_TICKETS", label: "Assigned to Me", count: counts?.myTickets },
+          { key: "UNASSIGNED", label: "Unassigned", count: counts?.unassigned },
+          { key: "HIGH_PRIORITY", label: "High & Urgent", count: counts?.highPriority },
+          { key: "RESOLVED", label: "Resolved / Closed", count: counts?.resolved },
         ].map((view) => (
           <button
             key={view.key}
@@ -433,13 +444,24 @@ export const EnquiriesPage: React.FC = () => {
               setActiveView(view.key as SavedView);
               setPage(1);
             }}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors shrink-0 ${
+            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
               activeView === view.key
                 ? "bg-blue-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             }`}
           >
-            {view.label}
+            <span>{view.label}</span>
+            {view.count !== undefined && (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  activeView === view.key
+                    ? "bg-white/20 text-white"
+                    : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
+                }`}
+              >
+                {view.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -464,13 +486,13 @@ export const EnquiriesPage: React.FC = () => {
               aria-label="Filter tickets by category"
               className="h-9 px-3 text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
             >
-              <option value="ALL">All Categories</option>
-              <option value="ATTENDANCE">Attendance</option>
-              <option value="LEAVE">Leave</option>
-              <option value="WFH">WFH</option>
-              <option value="PAYROLL">Payroll</option>
-              <option value="TECHNICAL">Technical</option>
-              <option value="OTHER">Other</option>
+              <option value="ALL">All Categories{counts?.all !== undefined ? ` (${counts.all})` : ""}</option>
+              <option value="ATTENDANCE">Attendance{counts?.byCategory?.ATTENDANCE !== undefined ? ` (${counts.byCategory.ATTENDANCE})` : ""}</option>
+              <option value="LEAVE">Leave{counts?.byCategory?.LEAVE !== undefined ? ` (${counts.byCategory.LEAVE})` : ""}</option>
+              <option value="WFH">WFH{counts?.byCategory?.WFH !== undefined ? ` (${counts.byCategory.WFH})` : ""}</option>
+              <option value="PAYROLL">Payroll{counts?.byCategory?.PAYROLL !== undefined ? ` (${counts.byCategory.PAYROLL})` : ""}</option>
+              <option value="TECHNICAL">Technical{counts?.byCategory?.TECHNICAL !== undefined ? ` (${counts.byCategory.TECHNICAL})` : ""}</option>
+              <option value="OTHER">Other{counts?.byCategory?.OTHER !== undefined ? ` (${counts.byCategory.OTHER})` : ""}</option>
             </select>
 
             <select
@@ -479,11 +501,11 @@ export const EnquiriesPage: React.FC = () => {
               aria-label="Filter tickets by status"
               className="h-9 px-3 text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
             >
-              <option value="ALL">All Statuses</option>
-              <option value="OPEN">Open</option>
-              <option value="IN_PROGRESS">In Progress</option>
-              <option value="RESOLVED">Resolved</option>
-              <option value="CLOSED">Closed</option>
+              <option value="ALL">All Statuses{counts?.all !== undefined ? ` (${counts.all})` : ""}</option>
+              <option value="OPEN">Open{counts?.byStatus?.OPEN !== undefined ? ` (${counts.byStatus.OPEN})` : ""}</option>
+              <option value="IN_PROGRESS">In Progress{counts?.byStatus?.IN_PROGRESS !== undefined ? ` (${counts.byStatus.IN_PROGRESS})` : ""}</option>
+              <option value="RESOLVED">Resolved{counts?.byStatus?.RESOLVED !== undefined ? ` (${counts.byStatus.RESOLVED})` : ""}</option>
+              <option value="CLOSED">Closed{counts?.byStatus?.CLOSED !== undefined ? ` (${counts.byStatus.CLOSED})` : ""}</option>
             </select>
 
             <select
@@ -492,11 +514,11 @@ export const EnquiriesPage: React.FC = () => {
               aria-label="Filter tickets by priority"
               className="h-9 px-3 text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
             >
-              <option value="ALL">All Priorities</option>
-              <option value="URGENT">Urgent</option>
-              <option value="HIGH">High</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="LOW">Low</option>
+              <option value="ALL">All Priorities{counts?.all !== undefined ? ` (${counts.all})` : ""}</option>
+              <option value="URGENT">Urgent{counts?.byPriority?.URGENT !== undefined ? ` (${counts.byPriority.URGENT})` : ""}</option>
+              <option value="HIGH">High{counts?.byPriority?.HIGH !== undefined ? ` (${counts.byPriority.HIGH})` : ""}</option>
+              <option value="MEDIUM">Medium{counts?.byPriority?.MEDIUM !== undefined ? ` (${counts.byPriority.MEDIUM})` : ""}</option>
+              <option value="LOW">Low{counts?.byPriority?.LOW !== undefined ? ` (${counts.byPriority.LOW})` : ""}</option>
             </select>
           </div>
         </div>

@@ -592,4 +592,131 @@ describe("Enquiries Subsystem behind Feature Flag (apps/api)", () => {
       expect(reopenRes.body.message).toContain("7-day window to reopen this enquiry has expired");
     });
   });
+
+  describe("Enquiry Counts & Tab Badges (GET /api/enquiries/counts)", () => {
+    it("returns accurate counts scoped for HR/Admin across all tickets", async () => {
+      // Create 2 tickets for Employee A
+      await request(app)
+        .post("/api/enquiries")
+        .set("Authorization", `Bearer ${employeeAToken}`)
+        .send({
+          category: "ATTENDANCE",
+          subject: "Punch missing morning",
+          message: "Check in failed",
+          priority: "HIGH",
+        });
+
+      const resA2 = await request(app)
+        .post("/api/enquiries")
+        .set("Authorization", `Bearer ${employeeAToken}`)
+        .send({
+          category: "LEAVE",
+          subject: "Leave balance discrepancy",
+          message: "Casual leave missing",
+          priority: "MEDIUM",
+        });
+
+      // Create 1 ticket for Employee B
+      await request(app)
+        .post("/api/enquiries")
+        .set("Authorization", `Bearer ${employeeBToken}`)
+        .send({
+          category: "TECHNICAL",
+          subject: "Keyboard issue",
+          message: "Spacebar stuck",
+          priority: "LOW",
+        });
+
+      // Assign ticket A2 to HR user
+      await request(app)
+        .patch(`/api/enquiries/${resA2.body.data._id}/assign`)
+        .set("Authorization", `Bearer ${hrToken}`)
+        .send({ assigneeId: hrUserId });
+
+      // Resolve ticket A2
+      await request(app)
+        .patch(`/api/enquiries/${resA2.body.data._id}/status`)
+        .set("Authorization", `Bearer ${hrToken}`)
+        .send({ status: "RESOLVED" });
+
+      // Request counts as HR
+      const countRes = await request(app)
+        .get("/api/enquiries/counts")
+        .set("Authorization", `Bearer ${hrToken}`);
+
+      expect(countRes.status).toBe(200);
+      expect(countRes.body.success).toBe(true);
+      const data = countRes.body.data;
+
+      expect(data.all).toBe(3);
+      expect(data.total).toBe(3);
+      expect(data.active).toBe(2); // 2 OPEN tickets
+      expect(data.resolved).toBe(1); // 1 RESOLVED ticket
+      expect(data.myTickets).toBe(1); // 1 assigned to HR
+      expect(data.unassigned).toBe(2); // 2 unassigned tickets
+      expect(data.highPriority).toBe(1); // 1 HIGH priority
+      expect(data.byCategory.ATTENDANCE).toBe(1);
+      expect(data.byCategory.LEAVE).toBe(1);
+      expect(data.byCategory.TECHNICAL).toBe(1);
+      expect(data.byStatus.OPEN).toBe(2);
+      expect(data.byStatus.RESOLVED).toBe(1);
+    });
+
+    it("scopes counts to only the caller's own tickets when requested by an employee", async () => {
+      // Employee A creates a ticket
+      await request(app)
+        .post("/api/enquiries")
+        .set("Authorization", `Bearer ${employeeAToken}`)
+        .send({
+          category: "ATTENDANCE",
+          subject: "A's dispute",
+          message: "A's message",
+          priority: "HIGH",
+        });
+
+      // Employee B creates 2 tickets
+      await request(app)
+        .post("/api/enquiries")
+        .set("Authorization", `Bearer ${employeeBToken}`)
+        .send({
+          category: "WFH",
+          subject: "B's WFH query",
+          message: "B's message 1",
+          priority: "MEDIUM",
+        });
+
+      await request(app)
+        .post("/api/enquiries")
+        .set("Authorization", `Bearer ${employeeBToken}`)
+        .send({
+          category: "PAYROLL",
+          subject: "B's salary slip",
+          message: "B's message 2",
+          priority: "LOW",
+        });
+
+      // Employee A requests counts
+      const resA = await request(app)
+        .get("/api/enquiries/counts")
+        .set("Authorization", `Bearer ${employeeAToken}`);
+
+      expect(resA.status).toBe(200);
+      expect(resA.body.data.all).toBe(1);
+      expect(resA.body.data.active).toBe(1);
+      expect(resA.body.data.byCategory.ATTENDANCE).toBe(1);
+      expect(resA.body.data.byCategory.WFH).toBeUndefined();
+
+      // Employee B requests counts
+      const resB = await request(app)
+        .get("/api/enquiries/counts")
+        .set("Authorization", `Bearer ${employeeBToken}`);
+
+      expect(resB.status).toBe(200);
+      expect(resB.body.data.all).toBe(2);
+      expect(resB.body.data.active).toBe(2);
+      expect(resB.body.data.byCategory.WFH).toBe(1);
+      expect(resB.body.data.byCategory.PAYROLL).toBe(1);
+      expect(resB.body.data.byCategory.ATTENDANCE).toBeUndefined();
+    });
+  });
 });
