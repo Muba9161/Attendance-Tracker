@@ -4,6 +4,8 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Icon } from "./Icon";
@@ -14,12 +16,14 @@ interface AnnouncementBannerProps {
   announcement: MobileAnnouncementItem | null;
   unreadCount?: number;
   onDismiss?: (id: string) => void;
+  style?: StyleProp<ViewStyle>;
 }
 
 export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({
   announcement,
   unreadCount = 0,
   onDismiss,
+  style,
 }) => {
   const router = useRouter();
   const [dismissed, setDismissed] = useState(false);
@@ -79,6 +83,7 @@ export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({
           borderColor: getBorderColor(),
           backgroundColor: getBgColor(),
         },
+        style,
       ]}
       accessibilityRole="button"
       accessibilityLabel={`Announcement: ${announcement.title}`}
@@ -162,10 +167,10 @@ export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({
             style={styles.closeButton}
             accessibilityLabel="Dismiss announcement banner"
           >
-            <Icon name="close" size={16} color={colors.text.muted} />
+            <Icon name="close" size={16} color={colors.muted} />
           </TouchableOpacity>
 
-          <Icon name="chevron-forward" size={16} color={colors.text.secondary} />
+          <Icon name="chevron-forward" size={16} color={colors.textSecondary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -174,11 +179,10 @@ export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
+    width: "100%",
     borderRadius: radii.lg,
     borderWidth: 1,
-    padding: spacing.md,
+    padding: 18,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
@@ -190,8 +194,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   iconContainer: {
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
@@ -266,12 +270,12 @@ const styles = StyleSheet.create({
   title: {
     ...typography.sm,
     fontWeight: "700",
-    color: colors.text.primary,
+    color: colors.text,
     marginBottom: 2,
   },
   body: {
     ...typography.xs,
-    color: colors.text.secondary,
+    color: colors.textSecondary,
     lineHeight: 16,
   },
   rightActions: {

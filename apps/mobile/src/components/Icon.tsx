@@ -9,6 +9,7 @@ interface IconProps {
   size?: number;
   color?: string;
   style?: StyleProp<TextStyle>;
+  strokeWidth?: number;
 }
 
 export const Icon: React.FC<IconProps> = ({ name, size = 20, color = "#FFFFFF", style }) => {

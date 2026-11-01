@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { colors, spacing, typography } from "../theme";
-import { Icon } from "./Icon";
+import { WifiOff } from "lucide-react-native";
 import { setNetworkStateListener } from "../services/api";
 
 export const OfflineBanner: React.FC = () => {
@@ -16,14 +16,8 @@ export const OfflineBanner: React.FC = () => {
   if (isOnline) return null;
 
   return (
-    <View
-      style={styles.banner}
-      testID="offline-banner"
-      accessibilityRole="alert"
-      accessibilityLiveRegion="polite"
-      accessibilityLabel="Offline Mode: Attempting to reconnect to VorldX attendance server"
-    >
-      <Icon name="cloud-offline" size={16} color={colors.status.late} />
+    <View style={styles.banner} testID="offline-banner" accessibilityRole="alert">
+      <WifiOff size={16} color={colors.status.late} strokeWidth={2} />
       <Text style={styles.text}>Offline Mode • Attempting to reconnect to VorldX...</Text>
     </View>
   );

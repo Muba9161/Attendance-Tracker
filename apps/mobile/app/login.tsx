@@ -1,30 +1,42 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
-import { useRouter } from "expo-router";
-import { useAuth } from "../src/context/AuthContext";
-import { useToast } from "../src/components/Toast";
-import { SafeAreaWrapper, Input, Button, Card, StatusBadge, Icon } from "../src/components";
-import { colors, spacing, typography, radii } from "../src/theme";
-import { ApiError } from "../src/services/api";
+import React, { useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Mail, Lock, ArrowRight, ArrowLeft, Clock } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { useAuth } from '../src/context/AuthContext';
+import { useToast } from '../src/components/Toast';
+import {
+  Screen,
+  Card,
+  Input,
+  Field,
+  Button,
+  Notice,
+  Text,
+} from '../src/components';
+import { colors, spacing } from '../src/theme/tokens';
+import { useResponsive } from '../src/lib/responsive';
+import { ApiError } from '../src/services/api';
 
 export default function LoginScreen() {
   const router = useRouter();
   const { login, sessionExpired, dismissSessionExpired } = useAuth();
   const { showToast } = useToast();
+  const { isWide } = useResponsive();
 
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
     const cleanId = identifier.trim();
     if (!cleanId) {
-      setError("Please enter your employee email or ID.");
+      setError('Please enter your employee email or ID.');
       return;
     }
     if (!password) {
-      setError("Please enter your password.");
+      setError('Please enter your password.');
       return;
     }
 
@@ -33,235 +45,212 @@ export default function LoginScreen() {
 
     try {
       await login(cleanId, password);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       showToast({
-        title: "Welcome Back",
-        message: "Logged in successfully.",
-        type: "success",
+        title: 'Welcome Back',
+        message: 'Logged in successfully.',
+        type: 'success',
       });
-      router.replace("/(tabs)/home");
+      router.replace('/(tabs)/home');
     } catch (err: unknown) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
       if (err instanceof ApiError) {
-        if (err.code === "ERR_ACCOUNT_LOCKED") {
-          setError("Account locked due to 5 consecutive failed attempts. Please wait 15 minutes or contact HR.");
-        } else if (err.code === "ERR_EMPLOYEE_INACTIVE") {
-          setError("Your employee profile is inactive. Please contact HR administrator.");
-        } else if (err.code === "ERR_INVALID_CREDENTIALS") {
-          setError("Invalid email/employee ID or password. Please verify and try again.");
+        if (err.code === 'ERR_ACCOUNT_LOCKED') {
+          setError('Account locked due to 5 consecutive failed attempts. Please wait 15 minutes or contact HR.');
+        } else if (err.code === 'ERR_EMPLOYEE_INACTIVE') {
+          setError('Your employee profile is inactive. Please contact HR administrator.');
+        } else if (err.code === 'ERR_INVALID_CREDENTIALS') {
+          setError('Invalid email/employee ID or password. Please verify and try again.');
         } else {
-          setError(err.message || "Failed to log in.");
+          setError(err.message || 'Failed to log in.');
         }
       } else {
-        setError("Unable to connect to VorldX attendance server.");
+        setError('Unable to connect to VorldX attendance server. Check your connection.');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const fillDemoCredentials = () => {
-    setIdentifier("aarav.sharma@vorldx.demo");
-    setPassword("Employee@2026!");
-    setError(null);
-  };
-
   return (
-    <SafeAreaWrapper contentContainerStyle={styles.container}>
-      {/* Session Expired Banner */}
-      {sessionExpired && (
-        <Card style={styles.sessionExpiredCard} variant="surface">
-          <View style={styles.sessionExpiredHeader}>
-            <Icon name="time-outline" size={20} color={colors.status.late} />
-            <Text style={styles.sessionExpiredTitle}>Session Expired</Text>
-          </View>
-          <Text style={styles.sessionExpiredText}>
-            Your security session has expired. Please sign in again to continue.
-          </Text>
-          <TouchableOpacity onPress={dismissSessionExpired} style={styles.dismissBtn}>
-            <Text style={styles.dismissBtnText}>Dismiss</Text>
+    <Screen
+      edges={['top', 'bottom']}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={styles.screenInner}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardWrap}
+      >
+        <View style={[styles.content, isWide && styles.contentWide]}>
+          {/* Back button */}
+          <TouchableOpacity
+            onPress={() => {
+              if (router.canGoBack()) router.back();
+              else router.replace('/');
+            }}
+            style={styles.backLink}
+          >
+            <ArrowLeft size={16} color={colors.textSecondary} />
+            <Text variant="small" color={colors.textSecondary}>
+              Back
+            </Text>
           </TouchableOpacity>
-        </Card>
-      )}
 
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Sign In</Text>
-        <Text style={styles.subtitle}>Enter your VorldX employee credentials</Text>
-      </View>
-
-      {/* Main Form Card */}
-      <Card variant="surface" style={styles.formCard}>
-        <Input
-          label="Email or Employee ID"
-          placeholder="e.g. emp1@vorldx.demo or EMP-001"
-          value={identifier}
-          onChangeText={(val) => {
-            setIdentifier(val);
-            if (error) setError(null);
-          }}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          leftIcon={<Icon name="person-outline" size={18} color={colors.text.secondary} />}
-          testID="login-identifier-input"
-        />
-
-        <Input
-          label="Password"
-          placeholder="Enter your password"
-          value={password}
-          onChangeText={(val) => {
-            setPassword(val);
-            if (error) setError(null);
-          }}
-          isPassword
-          leftIcon={<Icon name="lock-closed-outline" size={18} color={colors.text.secondary} />}
-          testID="login-password-input"
-        />
-
-        {error && (
-          <View style={styles.errorBanner} testID="login-error-banner">
-            <Icon name="alert-circle" size={18} color={colors.text.danger} />
-            <Text style={styles.errorBannerText}>{error}</Text>
+          {/* Hero Section */}
+          <View style={styles.hero}>
+            <Text variant="display" align="center" style={styles.headline} numberOfLines={1}>
+              Your workday, in one place.
+            </Text>
           </View>
-        )}
 
-        <Button
-          title="Sign In"
-          onPress={handleLogin}
-          isLoading={loading}
-          size="lg"
-          testID="login-submit-btn"
-          style={styles.submitBtn}
-        />
+          {/* Session Expired Banner */}
+          {sessionExpired && (
+            <Notice
+              tone="warning"
+              icon={<Clock size={18} color={colors.warning} />}
+              title="Session Expired"
+              message="Your security session has expired. Please sign in again to continue."
+              actionLabel="Dismiss"
+              onAction={dismissSessionExpired}
+            />
+          )}
 
-        {/* Demo Fast Fill Pill */}
-        <TouchableOpacity
-          onPress={fillDemoCredentials}
-          style={styles.demoFillBtn}
-          activeOpacity={0.7}
-          testID="login-demo-fill-btn"
-        >
-          <StatusBadge status="DEMO" label="QUICK-FILL DEMO ACCOUNT" />
-          <Text style={styles.demoFillText}>Auto-fill Aarav Sharma (EMP-1001)</Text>
-        </TouchableOpacity>
-      </Card>
+          {/* Main Card */}
+          <Card style={styles.card} padding={22} variant="raised">
+            <View style={styles.formHeader}>
+              <Text variant="title" align="center">Welcome back</Text>
+            </View>
 
-      {/* Bottom Switcher */}
-      <View style={styles.footer}>
-        <Text style={styles.footerPrompt}>New to VorldX?</Text>
-        <TouchableOpacity
-          onPress={() => router.push("/register")}
-          testID="login-goto-register-btn"
-          style={styles.registerLink}
-        >
-          <Text style={styles.registerLinkText}>Activate Employee Account</Text>
-          <Icon name="arrow-forward" size={16} color={colors.accent.cyan} />
-        </TouchableOpacity>
-      </View>
-    </SafeAreaWrapper>
+            {error ? (
+              <Notice tone="danger" title="Could not sign in" message={error} />
+            ) : null}
+
+            <View style={styles.fields}>
+              <Field label="Work email or Employee ID" required>
+                <Input
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  leftIcon={Mail}
+                  onChangeText={(val) => {
+                    setIdentifier(val);
+                    if (error) setError(null);
+                  }}
+                  placeholder="EMP-1001 or aarav.sharma@vorldx.demo"
+                  returnKeyType="next"
+                  value={identifier}
+                />
+              </Field>
+
+              <Field label="Password" required>
+                <Input
+                  autoCapitalize="none"
+                  leftIcon={Lock}
+                  isPassword
+                  onChangeText={(val) => {
+                    setPassword(val);
+                    if (error) setError(null);
+                  }}
+                  onSubmitEditing={handleLogin}
+                  placeholder="Your password"
+                  returnKeyType="go"
+                  value={password}
+                />
+              </Field>
+            </View>
+
+            <Button
+              label={loading ? 'Signing in...' : 'Sign in'}
+              loading={loading}
+              onPress={handleLogin}
+              rightIcon={
+                loading ? undefined : (
+                  <ArrowRight size={17} color={colors.white} strokeWidth={2.2} />
+                )
+              }
+            />
+
+            {/* Registration Link */}
+            <View style={styles.registerPrompt}>
+              <Text variant="small" color={colors.textSecondary}>
+                First time using VorldX?
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push('/register')}
+                style={styles.registerLink}
+              >
+                <Text variant="small" color={colors.indigoSoft} weight="semibold">
+                  Activate your account
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Card>
+        </View>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    justifyContent: "space-between",
-  },
-  sessionExpiredCard: {
-    borderColor: colors.status.late,
-    backgroundColor: "rgba(245, 158, 11, 0.1)",
-    marginBottom: spacing.lg,
-  },
-  sessionExpiredHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs + 2,
-    marginBottom: 4,
-  },
-  sessionExpiredTitle: {
-    ...typography.sm,
-    fontWeight: "700",
-    color: colors.status.late,
-  },
-  sessionExpiredText: {
-    ...typography.xs,
-    color: colors.text.secondary,
-  },
-  dismissBtn: {
-    alignSelf: "flex-end",
-    marginTop: spacing.sm,
-  },
-  dismissBtnText: {
-    ...typography.xs,
-    fontWeight: "700",
-    color: colors.status.late,
-  },
-  header: {
-    marginTop: spacing.md,
-    marginBottom: spacing.xl,
-  },
-  title: {
-    ...typography.xxl,
-    fontWeight: "800",
-    color: colors.text.primary,
-  },
-  subtitle: {
-    ...typography.sm,
-    color: colors.text.secondary,
-    marginTop: 4,
-  },
-  formCard: {
-    marginBottom: spacing.xl,
-  },
-  errorBanner: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: colors.status.absentBg,
-    borderColor: colors.status.absent,
-    borderWidth: 1,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  errorBannerText: {
+  screenInner: {
     flex: 1,
-    ...typography.xs,
-    color: colors.text.danger,
-    fontWeight: "600",
-    lineHeight: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  submitBtn: {
-    marginTop: spacing.xs,
+  keyboardWrap: {
+    width: '100%',
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  demoFillBtn: {
-    marginTop: spacing.lg,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.background.border,
-    alignItems: "center",
+  content: {
+    width: '100%',
+    maxWidth: 460,
+    gap: spacing.lg,
+    paddingVertical: spacing.md,
+    alignSelf: 'center',
+    justifyContent: 'center',
   },
-  demoFillText: {
-    ...typography.xs,
-    color: colors.text.muted,
-    marginTop: spacing.xs,
-    fontWeight: "500",
+  contentWide: {
+    maxWidth: 520,
   },
-  footer: {
-    alignItems: "center",
-    paddingVertical: spacing.lg,
+  backLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
   },
-  footerPrompt: {
-    ...typography.xs,
-    color: colors.text.muted,
-    marginBottom: spacing.xs,
+  hero: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing.xs,
+  },
+  headline: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  card: {
+    gap: spacing.lg,
+  },
+  formHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  fields: {
+    gap: spacing.md,
+  },
+  registerPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: spacing.xs,
   },
   registerLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  registerLinkText: {
-    ...typography.sm,
-    fontWeight: "700",
-    color: colors.accent.cyan,
+    paddingVertical: 4,
   },
 });
