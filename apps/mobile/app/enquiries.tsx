@@ -55,6 +55,7 @@ import {
   MobileEnquiryItem,
   EnquiryMessageItem,
   EnquiryAttachmentItem,
+  EnquiryCountsData,
   subscribeToSocketEvent,
   emitMobileSocketEvent,
 } from '../src/services';
@@ -163,6 +164,7 @@ export default function EnquiriesScreen() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [enquiries, setEnquiries] = useState<MobileEnquiryItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('ALL');
+  const [countsData, setCountsData] = useState<EnquiryCountsData | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Form State
@@ -210,9 +212,24 @@ export default function EnquiriesScreen() {
     }
   }, [statusFilter]);
 
+    const loadCounts = useCallback(async () => {
+    try {
+      const res = await enquiryApi.getEnquiryCounts();
+      if (res.success && res.data) {
+        setCountsData(res.data);
+      }
+    } catch (err: unknown) {
+      console.error('Failed to load enquiry counts:', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadEnquiries();
   }, [loadEnquiries]);
+
+  useEffect(() => {
+    loadCounts();
+  }, [loadCounts]);
 
   // Open Thread
   const openThread = async (ticket: MobileEnquiryItem) => {
@@ -463,8 +480,17 @@ export default function EnquiriesScreen() {
     return found ? found.icon : HelpCircle;
   };
 
-  // Status Filter Counts
+  // Status Filter Counts - uses server counts from /api/enquiries/counts so switching tabs never breaks counters
   const counts = useMemo(() => {
+    if (countsData) {
+      return {
+        all: countsData.all ?? countsData.total ?? 0,
+        open: countsData.byStatus?.OPEN ?? countsData.open ?? 0,
+        inProgress: countsData.byStatus?.IN_PROGRESS ?? countsData.inProgress ?? 0,
+        resolved: countsData.byStatus?.RESOLVED ?? countsData.resolvedOnly ?? 0,
+        closed: countsData.byStatus?.CLOSED ?? countsData.closed ?? 0,
+      };
+    }
     return {
       all: enquiries.length,
       open: enquiries.filter((e) => e.status === 'OPEN').length,
@@ -472,7 +498,7 @@ export default function EnquiriesScreen() {
       resolved: enquiries.filter((e) => e.status === 'RESOLVED').length,
       closed: enquiries.filter((e) => e.status === 'CLOSED').length,
     };
-  }, [enquiries]);
+  }, [countsData, enquiries]);
 
   return (
     <>
@@ -498,7 +524,7 @@ export default function EnquiriesScreen() {
           title="Helpdesk & Enquiries"
           right={
             <Badge
-              label={activeTab === 'list' ? `${enquiries.length} TICKETS` : 'NEW'}
+              label={activeTab === 'list' ? `${counts.all} TICKETS` : 'NEW'}
               tone={activeTab === 'list' ? 'indigo' : 'info'}
               size="sm"
             />
@@ -526,7 +552,7 @@ export default function EnquiriesScreen() {
                   weight={activeTab === 'list' ? 'bold' : 'medium'}
                   color={activeTab === 'list' ? colors.white : colors.muted}
                 >
-                  My Tickets ({enquiries.length})
+                  My Tickets ({counts.all})
                 </Text>
               </PressableScale>
 
@@ -626,7 +652,10 @@ export default function EnquiriesScreen() {
                     label="Retry"
                     size="sm"
                     variant="secondary"
-                    onPress={loadEnquiries}
+                    onPress={() => {
+                      loadEnquiries();
+                      loadCounts();
+                    }}
                     style={styles.retryBtn}
                   />
                 </Card>

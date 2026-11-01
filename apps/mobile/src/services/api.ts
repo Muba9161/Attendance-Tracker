@@ -641,7 +641,31 @@ export interface MobileEnquiryItem {
   attachments?: EnquiryAttachmentItem[];
 }
 
+export interface EnquiryCountsData {
+  all: number;
+  total: number;
+  active: number;
+  open: number;
+  inProgress: number;
+  resolved: number;
+  resolvedOnly: number;
+  closed: number;
+  myTickets: number;
+  unassigned: number;
+  highPriority: number;
+  byCategory: Record<string, number>;
+  byStatus: Record<string, number>;
+  byPriority: Record<string, number>;
+}
+
 export const enquiryApi = {
+  async getEnquiryCounts(): Promise<{
+    success: boolean;
+    data: EnquiryCountsData;
+  }> {
+    return apiRequest("/api/enquiries/counts");
+  },
+
   async getMyEnquiries(params?: {
     status?: string;
     category?: string;
