@@ -15,6 +15,7 @@
 | **FIX-03** | Low | Accessibility | Slide-over drawers did not restore focus to triggering table rows or buttons upon close | 🟢 Resolved & Verified |
 | **FIX-04** | Low | Performance / Diagnostics | Benign Recharts ResizeObserver loop notifications in synthetic test runner logs | 🟢 Resolved & Verified |
 | **FIX-05** | Enhancement | Design & Branding | Integration of official high-resolution VorldX logo across Display QR Kiosk and Web Portal | 🟢 Resolved & Verified |
+| **FIX-06** | High | Helpdesk & Enquiries | Enquiry module tab and filter badge counts reset or zeroed out when switching between views | 🟢 Resolved & Verified |
 
 ---
 
@@ -78,4 +79,32 @@
   - `apps/web/public/vorldx-logo.png`
   - [`apps/web/src/components/layout/Sidebar.tsx`](file:///c:/Attendance%20Tracker/apps/web/src/components/layout/Sidebar.tsx)
   - [`apps/web/src/pages/LoginPage.tsx`](file:///c:/Attendance%20Tracker/apps/web/src/pages/LoginPage.tsx)
+
+---
+
+### FIX-06: Authoritative Database Tab & Badge Counts in Enquiries Module
+- **Priority**: High
+- **Component**: `apps/api`, `apps/web`
+- **Issue**:
+  1. In the Enquiries module, switching between tabs ("Open & Active", "All Tickets", "Assigned to Me", "Unassigned", "High & Urgent", "Resolved / Closed") or applying filters caused stat card numbers and tab badges to drop to 0 or display inaccurate numbers.
+  2. Clicking the "Unassigned" tab crashed the view with "Failed to Load Enquiries: Could not retrieve enquiries from the backend service. Check your connection or feature flag configuration."
+- **Root Cause**:
+  1. Counts were calculated client-side in `EnquiriesPage.tsx` using `enquiries.filter(...)` over `enquiriesData.data`, which only contains the current page (max 30 items) of the *currently filtered* view. Switching to "Resolved / Closed" resulted in 0 open tickets on the client, causing "Active & Open" to collapse to 0.
+  2. Quick tabs lacked dedicated server-computed badge counts.
+  3. When the "Unassigned" tab was clicked, `EnquiriesPage.tsx` sent query parameter `assigneeId=UNASSIGNED`. In `apps/api/src/services/enquiry.service.ts`, `filter.assignee = new Types.ObjectId(query.assigneeId)` blindly attempted to instantiate a MongoDB `ObjectId` with the 10-character string `"UNASSIGNED"`, throwing an unhandled `BSONError` that crashed the request with HTTP 500.
+- **Fix**:
+  1. Added a high-performance read-only endpoint `GET /api/enquiries/counts` in `apps/api/src/services/enquiry.service.ts` using MongoDB `$facet` aggregation to compute `all`, `active`, `open`, `inProgress`, `resolved`, `myTickets`, `unassigned`, `highPriority`, `byCategory`, `byStatus`, and `byPriority` in a single query scoped strictly by user role (employee sees own, HR/admin sees all).
+  2. Handled `assigneeId === "UNASSIGNED"` in `enquiry.service.ts` to map to `filter.assignee = null`, validated ObjectIds via `Types.ObjectId.isValid()`, and supported compound status/priority filters (`OPEN,IN_PROGRESS`, `RESOLVED,CLOSED`, `HIGH,URGENT`).
+  3. Added `useEnquiryCounts()` query hook in `apps/web/src/api/queries.ts`.
+  4. Bound StatCard values, Saved View quick tabs, and dropdown filters to authoritative server counts in `apps/web/src/pages/EnquiriesPage.tsx`.
+  5. Configured cache invalidation for `["enquiry-counts"]` across all enquiry mutations and realtime socket events (`enquiry.created`, `enquiry.message_received`, `enquiry.status_updated`, `enquiry.assigned`).
+- **Files Changed**:
+  - [`apps/api/src/services/enquiry.service.ts`](file:///c:/Attendance%20Tracker/apps/api/src/services/enquiry.service.ts)
+  - [`apps/api/src/controllers/enquiry.controller.ts`](file:///c:/Attendance%20Tracker/apps/api/src/controllers/enquiry.controller.ts)
+  - [`apps/api/src/routes/enquiry.routes.ts`](file:///c:/Attendance%20Tracker/apps/api/src/routes/enquiry.routes.ts)
+  - [`apps/api/tests/enquiries.test.ts`](file:///c:/Attendance%20Tracker/apps/api/tests/enquiries.test.ts)
+  - [`apps/web/src/api/queries.ts`](file:///c:/Attendance%20Tracker/apps/web/src/api/queries.ts)
+  - [`apps/web/src/context/SocketContext.tsx`](file:///c:/Attendance%20Tracker/apps/web/src/context/SocketContext.tsx)
+  - [`apps/web/src/pages/EnquiriesPage.tsx`](file:///c:/Attendance%20Tracker/apps/web/src/pages/EnquiriesPage.tsx)
+
 

@@ -30,6 +30,9 @@ router.post(
 // List enquiries (scoped by role: employee sees own, HR/admin sees all)
 router.get("/", enquiryController.list);
 
+// Get tab and filter counts (scoped by role)
+router.get("/counts", enquiryController.getCounts);
+
 // Get enquiry details & conversation thread
 router.get("/:id", enquiryController.getById);
 

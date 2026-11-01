@@ -2047,7 +2047,49 @@ Guarded by `requireFeatureFlag("announcements")`. When the flag is disabled, all
   }
   ```
 
-#### 7.4.2 `POST /api/enquiries`
+#### 7.4.2 `GET /api/enquiries/counts`
+- **Role**: `Employee` (Counts scoped to caller's own tickets) / `HR` & `ADMIN` (Counts across all tickets)
+- **Description**: Returns authoritative database counts for UI quick tabs, saved views, and filter dropdown options in a single roundtrip aggregation. Guarantees tab badge stability independent of active pagination or table filters.
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "data": {
+      "all": 12,
+      "total": 12,
+      "active": 5,
+      "open": 3,
+      "inProgress": 2,
+      "resolved": 7,
+      "resolvedOnly": 4,
+      "closed": 3,
+      "myTickets": 4,
+      "unassigned": 3,
+      "highPriority": 2,
+      "byCategory": {
+        "ATTENDANCE": 5,
+        "LEAVE": 3,
+        "WFH": 2,
+        "PAYROLL": 1,
+        "TECHNICAL": 1
+      },
+      "byStatus": {
+        "OPEN": 3,
+        "IN_PROGRESS": 2,
+        "RESOLVED": 4,
+        "CLOSED": 3
+      },
+      "byPriority": {
+        "LOW": 2,
+        "MEDIUM": 8,
+        "HIGH": 1,
+        "URGENT": 1
+      }
+    }
+  }
+  ```
+
+#### 7.4.3 `POST /api/enquiries`
 - **Role**: `Employee` / `HR` / `ADMIN`
 - **Request Body**:
   ```json

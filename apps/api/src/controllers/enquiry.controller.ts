@@ -65,6 +65,19 @@ export class EnquiryController {
   });
 
   /**
+   * GET /api/enquiries/counts
+   */
+  public getCounts = asyncHandler(async (req: Request, res: Response) => {
+    const { userId, role } = this.getAuthenticatedUser(req);
+    const counts = await enquiryService.getEnquiryCounts(userId, role);
+
+    res.status(200).json({
+      success: true,
+      data: counts,
+    });
+  });
+
+  /**
    * GET /api/enquiries/:id
    */
   public getById = asyncHandler(async (req: Request, res: Response) => {

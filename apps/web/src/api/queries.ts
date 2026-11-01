@@ -1955,6 +1955,31 @@ export interface EnquiriesFilters {
   limit?: number;
 }
 
+export interface EnquiryCountsData {
+  all: number;
+  total: number;
+  active: number;
+  open: number;
+  inProgress: number;
+  resolved: number;
+  resolvedOnly: number;
+  closed: number;
+  myTickets: number;
+  unassigned: number;
+  highPriority: number;
+  byCategory: Record<string, number>;
+  byStatus: Record<string, number>;
+  byPriority: Record<string, number>;
+}
+
+export function useEnquiryCounts() {
+  return useQuery<{ success: boolean; data: EnquiryCountsData }>({
+    queryKey: ["enquiry-counts"],
+    queryFn: () => api.get<{ success: boolean; data: EnquiryCountsData }>("/api/enquiries/counts"),
+    staleTime: 1000 * 15,
+  });
+}
+
 export function useEnquiries(filters: EnquiriesFilters = {}) {
   const query = new URLSearchParams();
   if (filters.status && filters.status !== "ALL") query.set("status", filters.status);
@@ -1999,6 +2024,7 @@ export function useCreateEnquiry() {
     }) => api.post<{ success: boolean; message: string; data: EnquiryItem }>("/api/enquiries", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["enquiries"] });
+      queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
     },
   });
 }
@@ -2024,6 +2050,7 @@ export function useSendEnquiryMessage() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["enquiries"] });
       queryClient.invalidateQueries({ queryKey: ["enquiry-details", id] });
+      queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
     },
   });
 }
@@ -2047,6 +2074,7 @@ export function useUpdateEnquiryStatus() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["enquiries"] });
       queryClient.invalidateQueries({ queryKey: ["enquiry-details", id] });
+      queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
     },
   });
 }
@@ -2068,6 +2096,7 @@ export function useAssignEnquiry() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["enquiries"] });
       queryClient.invalidateQueries({ queryKey: ["enquiry-details", id] });
+      queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
     },
   });
 }
@@ -2089,6 +2118,7 @@ export function useReopenEnquiry() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["enquiries"] });
       queryClient.invalidateQueries({ queryKey: ["enquiry-details", id] });
+      queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
     },
   });
 }

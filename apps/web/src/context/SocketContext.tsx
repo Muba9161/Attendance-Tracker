@@ -193,6 +193,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       "enquiry.created",
       (data: { ticketNumber?: string; subject?: string; category?: string }) => {
         queryClient.invalidateQueries({ queryKey: ["enquiries"] });
+        queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
         toast({
           type: "info",
           title: `New Enquiry ${data.ticketNumber || ""}`,
@@ -205,6 +206,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       "enquiry.message_received",
       (data: { enquiryId?: string; ticketNumber?: string; senderRole?: string; message?: string }) => {
         queryClient.invalidateQueries({ queryKey: ["enquiries"] });
+        queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
         if (data.enquiryId) {
           queryClient.invalidateQueries({ queryKey: ["enquiry-details", data.enquiryId] });
         }
@@ -222,6 +224,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       "enquiry.status_updated",
       (data: { enquiryId?: string; ticketNumber?: string; status?: string }) => {
         queryClient.invalidateQueries({ queryKey: ["enquiries"] });
+        queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
         if (data.enquiryId) {
           queryClient.invalidateQueries({ queryKey: ["enquiry-details", data.enquiryId] });
         }
@@ -232,6 +235,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       "enquiry.assigned",
       (data: { enquiryId?: string; ticketNumber?: string; assigneeName?: string }) => {
         queryClient.invalidateQueries({ queryKey: ["enquiries"] });
+        queryClient.invalidateQueries({ queryKey: ["enquiry-counts"] });
         if (data.enquiryId) {
           queryClient.invalidateQueries({ queryKey: ["enquiry-details", data.enquiryId] });
         }
