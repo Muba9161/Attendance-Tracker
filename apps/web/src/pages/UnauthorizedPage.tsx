@@ -6,11 +6,11 @@ import { Button } from "../components/ui/Button";
 export const UnauthorizedPage: React.FC = () => {
   return (
     <div className="min-h-[70vh] flex flex-col items-center justify-center text-center p-6">
-      <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4 shadow-sm border border-rose-200">
+      <div className="w-16 h-16 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4 shadow-xs border border-rose-200 dark:border-rose-800">
         <ShieldAlert className="w-8 h-8" />
       </div>
-      <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Access Restricted</h1>
-      <p className="text-sm text-slate-600 max-w-md mt-2">
+      <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Access Restricted</h1>
+      <p className="text-sm text-slate-600 dark:text-slate-300 max-w-md mt-2">
         You do not have administrative permissions to view this module. This section is restricted
         to authorized HR and Admin accounts.
       </p>

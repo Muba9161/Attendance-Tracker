@@ -73,7 +73,7 @@ export const AnnouncementDashboardBlock: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="p-4 rounded-xl border border-slate-200 bg-white/60 space-y-3">
+      <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 space-y-3">
         <div className="flex items-center gap-3">
           <Skeleton className="w-5 h-5 rounded-full" />
           <Skeleton className="h-5 w-48" />
@@ -115,7 +115,7 @@ export const AnnouncementDashboardBlock: React.FC = () => {
 
   if (visibleAnnouncements.length === 0) {
     return (
-      <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+      <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
           <span>All recent announcements dismissed from your dashboard view.</span>
@@ -149,7 +149,7 @@ export const AnnouncementDashboardBlock: React.FC = () => {
       case "LOW":
         return {
           icon: Bell,
-          badgeBg: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300",
+          badgeBg: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700",
           cardBorder: "border-l-4 border-l-slate-400 border-slate-200 dark:border-slate-800",
           cardBg: "bg-white dark:bg-slate-900",
           iconColor: "text-slate-500 dark:text-slate-400",
@@ -255,7 +255,7 @@ export const AnnouncementDashboardBlock: React.FC = () => {
                       type="button"
                       onClick={(e) => handleMarkRead(item._id, e)}
                       title="Mark as Read"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
                     >
                       <CheckCircle2 className="w-4 h-4" />
                     </button>

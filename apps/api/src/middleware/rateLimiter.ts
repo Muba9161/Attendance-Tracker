@@ -12,15 +12,17 @@ export interface CustomRateLimiterOptions {
 }
 
 export const createRateLimiter = (options: CustomRateLimiterOptions = {}) => {
-  const isTest = process.env.NODE_ENV === "test" || Boolean(process.env.VITEST);
+  const isTestMode = () =>
+    process.env.NODE_ENV === "test" || Boolean(process.env.VITEST);
+
   const windowMs = options.windowMs ?? env.RATE_LIMIT_WINDOW_MS;
-  const max = isTest ? 10000 : (options.max ?? env.RATE_LIMIT_MAX);
+  const defaultMax = options.max ?? env.RATE_LIMIT_MAX;
   const message = options.message ?? "Too many requests. Please try again later.";
 
   return rateLimit({
     windowMs,
-    max,
-    skip: () => isTest,
+    max: () => (isTestMode() ? 10000 : defaultMax),
+    skip: () => isTestMode(),
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req: Request, _res: Response) => {

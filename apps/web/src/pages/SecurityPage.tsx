@@ -100,23 +100,13 @@ export const SecurityPage: React.FC = () => {
       ]);
     };
 
-    socket.on("staff:otp_locked", (data: { mobileNumber?: string; reason?: string }) => {
+    socket.on("auth:locked", (data: { email?: string; reason?: string }) => {
       addEvent({
         type: "LOCKOUT",
         title: "Account Lockout Triggered",
-        description: data.reason || "Staff account locked after consecutive failed OTP attempts.",
+        description: data.reason || "Staff account locked after consecutive failed login attempts.",
         timestamp: new Date().toISOString(),
-        target: data.mobileNumber,
-      });
-    });
-
-    socket.on("staff:otp_failed", (data: { mobileNumber?: string; remainingAttempts?: number }) => {
-      addEvent({
-        type: "FAILED",
-        title: "Failed OTP Attempt",
-        description: `Incorrect verification code. ${data.remainingAttempts ?? 0} attempt(s) remaining.`,
-        timestamp: new Date().toISOString(),
-        target: data.mobileNumber,
+        target: data.email,
       });
     });
 
@@ -141,8 +131,7 @@ export const SecurityPage: React.FC = () => {
     });
 
     return () => {
-      socket.off("staff:otp_locked");
-      socket.off("staff:otp_failed");
+      socket.off("auth:locked");
       socket.off("staff:security_alert");
       socket.off("staff:force_logout");
     };
@@ -199,7 +188,7 @@ export const SecurityPage: React.FC = () => {
       toast({
         type: "success",
         title: "Device Trust Revoked",
-        description: `${deviceToRevoke.deviceName} will require full OTP verification on next login.`,
+        description: `${deviceToRevoke.deviceName} will require full authentication on next login.`,
       });
     } catch {
       toast({
@@ -333,7 +322,7 @@ export const SecurityPage: React.FC = () => {
 
           {liveEvents.length === 0 ? (
             <div className="py-6 text-center text-xs text-slate-500 dark:text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-              No security anomalies detected in this session. Real-time OTP requests, brute-force lockouts, and forced logouts will appear here instantly.
+              No security anomalies detected in this session. Real-time authentication alerts, brute-force lockouts, and forced logouts will appear here instantly.
             </div>
           ) : (
             <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -499,7 +488,7 @@ export const SecurityPage: React.FC = () => {
             <span>Trusted Hardware Devices</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Devices registered with extended 30-day trust for passwordless OTP elevation.
+            Devices registered with extended 30-day trust and persistent sessions.
           </p>
         </div>
 
@@ -635,7 +624,7 @@ export const SecurityPage: React.FC = () => {
         onClose={() => setDeviceToRevoke(null)}
         onConfirm={handleConfirmRevokeDevice}
         title="Remove Trusted Hardware"
-        message={`Revoke hardware trust for "${deviceToRevoke?.deviceName}"? The device will require multi-factor OTP verification on subsequent logins.`}
+        message={`Revoke hardware trust for "${deviceToRevoke?.deviceName}"? The device will require full authentication on subsequent logins.`}
         confirmText="Remove Trust"
         variant="danger"
         isLoading={revokeDeviceMutation.isPending}

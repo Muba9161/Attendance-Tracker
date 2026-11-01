@@ -413,16 +413,16 @@ export const DisplaysPage: React.FC = () => {
       >
         {createdDisplay ? (
           <div className="space-y-4 text-center py-2">
-            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-6 h-6" />
             </div>
 
             <div>
-              <h3 className="font-bold text-slate-900 text-base">{createdDisplay.name}</h3>
-              <p className="text-xs text-slate-500 font-mono mt-0.5">{createdDisplay.terminalId}</p>
+              <h3 className="font-bold text-slate-900 dark:text-slate-100 text-base">{createdDisplay.name}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">{createdDisplay.terminalId}</p>
             </div>
 
-            <div className="p-4 bg-slate-900 text-white rounded-xl shadow-inner max-w-xs mx-auto space-y-2">
+            <div className="p-4 bg-slate-900 dark:bg-slate-950 text-white rounded-xl shadow-inner max-w-xs mx-auto space-y-2 border border-slate-800">
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                 One-Time Pairing Code
               </div>
@@ -443,7 +443,7 @@ export const DisplaysPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 text-left flex items-start gap-2.5">
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg text-xs text-amber-800 dark:text-amber-200 text-left flex items-start gap-2.5">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold">Important: </span>
@@ -470,7 +470,7 @@ export const DisplaysPage: React.FC = () => {
         ) : (
           <form onSubmit={handleRegisterSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Display Terminal Name *
               </label>
               <Input
@@ -483,7 +483,7 @@ export const DisplaysPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Location Description *
               </label>
               <Input
@@ -495,11 +495,11 @@ export const DisplaysPage: React.FC = () => {
               />
             </div>
 
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 rounded-lg text-xs text-blue-800 dark:text-blue-300">
               Registration generates a secure terminal ID and a one-time 15-minute pairing code for the kiosk.
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <Button
                 type="button"
                 variant="outline"
@@ -544,7 +544,7 @@ export const DisplaysPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Revocation Reason (Recorded in Audit Trail)
               </label>
               <Input
@@ -555,7 +555,7 @@ export const DisplaysPage: React.FC = () => {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <Button
                 type="button"
                 variant="outline"
@@ -589,14 +589,14 @@ export const DisplaysPage: React.FC = () => {
       >
         {selectedDisplay && (
           <div className="space-y-4">
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-slate-600 dark:text-slate-300">
               {selectedDisplay.isActive
                 ? `Disabling ${selectedDisplay.name} will temporarily prevent it from requesting new rotating QR codes.`
                 : `Enabling ${selectedDisplay.name} will restore its rotating QR code generation.`}
             </p>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Reason (Optional)
               </label>
               <Input
@@ -606,7 +606,7 @@ export const DisplaysPage: React.FC = () => {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <Button
                 type="button"
                 variant="outline"

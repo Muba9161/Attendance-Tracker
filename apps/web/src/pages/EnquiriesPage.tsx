@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   LifeBuoy,
   Search,
@@ -135,6 +135,10 @@ export const EnquiriesPage: React.FC = () => {
   const totalCount = enquiriesData?.total || 0;
   const currentTicket = activeTicketData?.data;
   const currentMessages = activeTicketData?.messages || [];
+
+  const handleCloseDrawer = useCallback(() => {
+    setActiveTicketId(null);
+  }, []);
 
   // HR Staff list for assignment
   const hrStaffMembers = useMemo(() => {
@@ -720,7 +724,7 @@ export const EnquiriesPage: React.FC = () => {
       {/* ================================================================= */}
       <Drawer
         isOpen={activeTicketId !== null}
-        onClose={() => setActiveTicketId(null)}
+        onClose={handleCloseDrawer}
         title={currentTicket ? `${currentTicket.ticketNumber} - ${currentTicket.subject}` : "Enquiry Thread"}
         width="xl"
       >

@@ -23,6 +23,7 @@ export * from "./EnquiryMessage";
 export * from "./StaffOtpChallenge";
 export * from "./TrustedDevice";
 export * from "./StaffSession";
+export * from "./StaffInvitation";
 export * from "./AppRelease";
 export * from "./SavedView";
 export * from "./Notification";

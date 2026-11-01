@@ -859,63 +859,63 @@ export const CalendarPage: React.FC = () => {
       {/* MONTH SUMMARY STATS BAR */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <Card className="p-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-center shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
             Working Days
           </span>
           <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5 block">
             {monthSummary.workingDays}
           </span>
-          <span className="text-[10px] text-slate-400">Attendance mandatory</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-400">Attendance mandatory</span>
         </Card>
 
         <Card className="p-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-center shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
             Public Holidays
           </span>
           <span className="text-xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5 block">
             {monthSummary.holidays}
           </span>
-          <span className="text-[10px] text-slate-400">Gazetted / declared</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-400">Gazetted / declared</span>
         </Card>
 
         <Card className="p-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-center shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
             Company Off-Days
           </span>
           <span className="text-xl font-extrabold text-amber-600 dark:text-amber-400 mt-0.5 block">
             {monthSummary.companyOffDays}
           </span>
-          <span className="text-[10px] text-slate-400">Exempt from punch</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-400">Exempt from punch</span>
         </Card>
 
         <Card className="p-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-center shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
             Weekly-Offs
           </span>
           <span className="text-xl font-extrabold text-slate-700 dark:text-slate-300 mt-0.5 block">
             {monthSummary.weeklyOffs}
           </span>
-          <span className="text-[10px] text-slate-400">Saturdays & Sundays</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-400">Saturdays & Sundays</span>
         </Card>
 
         <Card className="p-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-center shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
             WFH Scheduled
           </span>
           <span className="text-xl font-extrabold text-sky-600 dark:text-sky-400 mt-0.5 block">
             {monthSummary.wfhDays}
           </span>
-          <span className="text-[10px] text-slate-400">Approved remote</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-400">Approved remote</span>
         </Card>
 
         <Card className="p-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-center shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
             Total Days
           </span>
           <span className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 block">
             {monthSummary.daysInMonth}
           </span>
-          <span className="text-[10px] text-slate-400">{currentDate.toLocaleString("default", { month: "short" })} duration</span>
+          <span className="text-[10px] text-slate-400 dark:text-slate-400">{currentDate.toLocaleString("default", { month: "short" })} duration</span>
         </Card>
       </div>
 
@@ -965,7 +965,7 @@ export const CalendarPage: React.FC = () => {
               className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
                 view === "month"
                   ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
               }`}
               title="Month View (Press M)"
             >
@@ -976,7 +976,7 @@ export const CalendarPage: React.FC = () => {
               className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
                 view === "week"
                   ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
               }`}
               title="Week View (Press W)"
             >
@@ -987,7 +987,7 @@ export const CalendarPage: React.FC = () => {
               className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
                 view === "year"
                   ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
               }`}
               title="Year View (Press Y)"
             >
@@ -1000,7 +1000,7 @@ export const CalendarPage: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
           {/* Overlay Switches */}
           <div className="flex items-center flex-wrap gap-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">
               Overlays:
             </span>
 
@@ -1009,7 +1009,7 @@ export const CalendarPage: React.FC = () => {
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
                 showLeaveOverlay
                   ? "bg-teal-50 dark:bg-teal-950/60 border-teal-300 dark:border-teal-800 text-teal-800 dark:text-teal-300"
-                  : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-400"
+                  : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400"
               }`}
             >
               <Palmtree className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
@@ -1022,7 +1022,7 @@ export const CalendarPage: React.FC = () => {
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
                 showWfhOverlay
                   ? "bg-sky-50 dark:bg-sky-950/60 border-sky-300 dark:border-sky-800 text-sky-800 dark:text-sky-300"
-                  : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-400"
+                  : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400"
               }`}
             >
               <Home className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
@@ -1035,7 +1035,7 @@ export const CalendarPage: React.FC = () => {
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
                 showAbsenceOverlay
                   ? "bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-300"
-                  : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-400"
+                  : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400"
               }`}
             >
               <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
@@ -1070,7 +1070,7 @@ export const CalendarPage: React.FC = () => {
               />
             </div>
 
-            <span className="hidden xl:inline text-[11px] text-slate-400 font-mono">
+            <span className="hidden xl:inline text-[11px] text-slate-500 dark:text-slate-400 font-mono">
               Shortcuts: ← / → • T • M / W / Y
             </span>
           </div>
@@ -1078,7 +1078,7 @@ export const CalendarPage: React.FC = () => {
 
         {/* Row 3: Color + Icon Legend */}
         <div className="flex items-center flex-wrap gap-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Legend:
           </span>
 
@@ -1168,7 +1168,7 @@ export const CalendarPage: React.FC = () => {
                   // Background tinting
                   let bgClass = "bg-white dark:bg-slate-900";
                   if (!cell.isCurrentMonth) {
-                    bgClass = "bg-slate-50/60 dark:bg-slate-950/40 opacity-50";
+                    bgClass = "bg-slate-100/50 dark:bg-slate-950/60";
                   } else if (isHoliday) {
                     bgClass = "bg-indigo-50/40 dark:bg-indigo-950/20";
                   } else if (isOffDay) {
@@ -1200,7 +1200,7 @@ export const CalendarPage: React.FC = () => {
                                 ? "bg-blue-600 text-white font-extrabold shadow-xs"
                                 : cell.isCurrentMonth
                                   ? "text-slate-800 dark:text-slate-200 font-semibold"
-                                  : "text-slate-400"
+                                  : "text-slate-500 dark:text-slate-400 font-medium"
                             }`}
                           >
                             {cell.dayNumber}
@@ -1348,11 +1348,11 @@ export const CalendarPage: React.FC = () => {
                             Company Off
                           </span>
                         ) : cell.isWeeklyOff ? (
-                          <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                          <span className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                             Weekly-Off
                           </span>
                         ) : (
-                          <span className="text-[9px] text-emerald-600 dark:text-emerald-500 uppercase tracking-wider">
+                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
                             Workday
                           </span>
                         )}
@@ -1406,7 +1406,7 @@ export const CalendarPage: React.FC = () => {
                       {/* Day Header */}
                       <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
                         <div>
-                          <span className="text-xs font-semibold text-slate-500 uppercase block">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase block">
                             {dayName}
                           </span>
                           <span
@@ -1729,7 +1729,7 @@ export const CalendarPage: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40">
           <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
             <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 Scheduled Events
               </span>
               <span className="text-xl font-extrabold text-indigo-600 dark:text-indigo-400 block mt-0.5">
@@ -1743,7 +1743,7 @@ export const CalendarPage: React.FC = () => {
 
           <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
             <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 Approved Remote
               </span>
               <span className="text-xl font-extrabold text-sky-600 dark:text-sky-400 block mt-0.5">
@@ -1757,7 +1757,7 @@ export const CalendarPage: React.FC = () => {
 
           <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
             <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 Absences Logged
               </span>
               <span className="text-xl font-extrabold text-rose-600 dark:text-rose-400 block mt-0.5">
@@ -1771,7 +1771,7 @@ export const CalendarPage: React.FC = () => {
 
           <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
             <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 Estimated Capacity
               </span>
               <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 block mt-0.5">

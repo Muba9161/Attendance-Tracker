@@ -1,55 +1,15 @@
 import { Router } from "express";
 import { staffAuthController } from "../controllers/staffAuth.controller";
-import { validate } from "../middleware/validate";
 import { authenticate, requireRole, authenticateStaffSession } from "../middleware/auth";
-import { authRateLimiter } from "../middleware/rateLimiter";
-import {
-  StaffOtpStartInputSchema,
-  StaffOtpVerifyInputSchema,
-  UserRole,
-} from "@vorldx/shared";
+import { UserRole } from "@vorldx/shared";
 
 const router = Router();
 
 /**
- * @route   POST /api/auth/staff/otp-start
- * @alias   POST /api/auth/staff/login-request
- * @desc    Request a 6-digit SMS OTP for staff authentication (Admin / HR)
- * @access  Public (Rate-limited, Enumeration-safe)
+ * Note: Legacy staff OTP routes (/api/auth/staff/otp-start, login-request, otp-verify, login-verify)
+ * have been decommissioned in favor of email + password authentication with Admin invitations.
+ * They deliberately return 404 Not Found.
  */
-router.post(
-  "/api/auth/staff/otp-start",
-  authRateLimiter,
-  validate({ body: StaffOtpStartInputSchema }),
-  staffAuthController.requestOtp
-);
-
-router.post(
-  "/api/auth/staff/login-request",
-  authRateLimiter,
-  validate({ body: StaffOtpStartInputSchema }),
-  staffAuthController.requestOtp
-);
-
-/**
- * @route   POST /api/auth/staff/otp-verify
- * @alias   POST /api/auth/staff/login-verify
- * @desc    Verify SMS OTP, recognize trusted hardware, establish staff session
- * @access  Public (Rate-limited, Lockout-protected)
- */
-router.post(
-  "/api/auth/staff/otp-verify",
-  authRateLimiter,
-  validate({ body: StaffOtpVerifyInputSchema }),
-  staffAuthController.verifyOtp
-);
-
-router.post(
-  "/api/auth/staff/login-verify",
-  authRateLimiter,
-  validate({ body: StaffOtpVerifyInputSchema }),
-  staffAuthController.verifyOtp
-);
 
 /**
  * @route   GET /api/auth/staff/sessions

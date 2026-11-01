@@ -3,18 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>VorldX | Attendance & Workforce Management</title>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem("vorldx_theme_preference");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var resolved = (saved === "dark" || ((!saved || saved === "system") && prefersDark)) ? "dark" : "light";
+          var root = document.documentElement;
+          if (resolved === "dark") {
+            root.classList.add("dark");
+            root.classList.remove("light");
+            root.setAttribute("data-theme", "dark");
+            root.style.colorScheme = "dark";
+          } else {
+            root.classList.remove("dark");
+            root.classList.add("light");
+            root.setAttribute("data-theme", "light");
+            root.style.colorScheme = "light";
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="/assets/index-CQzxXJFR.js"></script>
+    <script type="module" crossorigin src="/assets/index-tWOi01Ev.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/three-vendor-DHSnEhgC.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CVfHjF6F.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-CaMBRuJY.css">
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased font-sans min-h-screen">
+  <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased font-sans min-h-screen">
     <div id="root"></div>
   </body>
 </html>

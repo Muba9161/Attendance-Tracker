@@ -67,7 +67,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return theme;
   }, [theme, systemIsDark]);
 
-  // Apply to DOM
+  // Apply to DOM & Native Controls
   useEffect(() => {
     const root = document.documentElement;
     if (resolvedTheme === "dark") {
@@ -78,6 +78,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       root.classList.add("light");
     }
     root.setAttribute("data-theme", resolvedTheme);
+    root.style.colorScheme = resolvedTheme;
+
+    // Synchronize <meta name="color-scheme">
+    let metaTheme = document.querySelector('meta[name="color-scheme"]');
+    if (!metaTheme) {
+      metaTheme = document.createElement("meta");
+      metaTheme.setAttribute("name", "color-scheme");
+      document.head.appendChild(metaTheme);
+    }
+    metaTheme.setAttribute("content", resolvedTheme);
   }, [resolvedTheme]);
 
   const setTheme = (newTheme: ThemeMode) => {

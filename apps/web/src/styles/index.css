@@ -207,6 +207,47 @@
   }
 }
 
+/* Recharts Dark Mode Support & High-Contrast Overrides */
+.dark .recharts-cartesian-grid-horizontal line,
+.dark .recharts-cartesian-grid-vertical line {
+  stroke: #1e293b !important;
+  stroke-opacity: 0.8 !important;
+}
+
+.dark .recharts-text.recharts-cartesian-axis-tick-value,
+.dark .recharts-cartesian-axis-tick-value {
+  fill: #94a3b8 !important;
+}
+
+.dark .recharts-default-legend .recharts-legend-item-text,
+.dark .recharts-legend-item-text {
+  color: #cbd5e1 !important;
+  fill: #cbd5e1 !important;
+}
+
+/* Native date/time picker controls and indicators in Dark Mode */
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="datetime-local"] {
+  color-scheme: dark;
+}
+
+.dark ::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+  cursor: pointer;
+}
+
+/* Native autofill styles in dark mode */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark select:-webkit-autofill,
+.dark textarea:-webkit-autofill {
+  -webkit-text-fill-color: #f8fafc !important;
+  -webkit-box-shadow: 0 0 0px 1000px #0f172a inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 /* Custom sleek scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -224,4 +265,12 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }

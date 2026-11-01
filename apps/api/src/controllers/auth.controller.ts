@@ -157,7 +157,12 @@ export class AuthController {
       );
     }
 
-    const result = await authService.login(loginIdentifier, password);
+    const meta = {
+      ipAddress: (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1",
+      userAgent: (req.headers["user-agent"] as string) || "unknown",
+    };
+
+    const result = await authService.login(loginIdentifier, password, meta);
 
     // Set secure HTTP-only refresh token cookie for browser clients
     res.cookie("refreshToken", result.refreshToken, {
@@ -259,6 +264,51 @@ export class AuthController {
       user: profile.user,
       employee: profile.employee,
     });
+  });
+
+  public signup = asyncHandler(async (req: Request, res: Response) => {
+    const { email, password, name, inviteToken } = req.body;
+    const result = await authService.signup({ email, password, name, inviteToken });
+    res.status(201).json(result);
+  });
+
+  public verifyEmail = asyncHandler(async (req: Request, res: Response) => {
+    const token = req.body?.token || (req.query?.token as string);
+    const result = await authService.verifyEmail(token);
+    res.status(200).json(result);
+  });
+
+  public resendVerification = asyncHandler(async (req: Request, res: Response) => {
+    const { email } = req.body;
+    const result = await authService.resendVerification(email);
+    res.status(200).json(result);
+  });
+
+  public forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+    const { email } = req.body;
+    const result = await authService.forgotPassword(email);
+    res.status(200).json(result);
+  });
+
+  public resetPassword = asyncHandler(async (req: Request, res: Response) => {
+    const { token, password } = req.body;
+    const result = await authService.resetPassword(token, password);
+    res.status(200).json(result);
+  });
+
+  public invite = asyncHandler(async (req: Request, res: Response) => {
+    const adminUserId = req.user?.userId;
+    if (!adminUserId) {
+      throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    }
+    const result = await authService.createStaffInvite(adminUserId, req.body);
+    res.status(201).json(result);
+  });
+
+  public verifyInvite = asyncHandler(async (req: Request, res: Response) => {
+    const token = (req.query?.token as string) || req.body?.token;
+    const result = await authService.verifyInvite(token);
+    res.status(200).json(result);
   });
 }
 

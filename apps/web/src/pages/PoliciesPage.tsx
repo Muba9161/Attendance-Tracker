@@ -406,10 +406,10 @@ export const PoliciesPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header & Version Indicator */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+            <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
               Attendance Policies & Shifts
             </h1>
             {activePolicy && (
@@ -418,7 +418,7 @@ export const PoliciesPage: React.FC = () => {
               </Badge>
             )}
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Configure shift timings, punctuality tolerances, remote work quotas, and official
             holidays
           </p>
@@ -441,13 +441,13 @@ export const PoliciesPage: React.FC = () => {
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 text-sm font-medium">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 text-sm font-medium">
         <button
           onClick={() => setActiveTab("policy")}
           className={`flex items-center gap-2 px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === "policy"
-              ? "border-blue-600 text-blue-600 font-semibold"
-              : "border-transparent text-slate-600 hover:text-slate-900"
+              ? "border-blue-600 text-blue-600 dark:text-blue-400 font-semibold"
+              : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
           }`}
         >
           <Settings2 className="w-4 h-4" />
@@ -458,8 +458,8 @@ export const PoliciesPage: React.FC = () => {
           onClick={() => setActiveTab("holidays")}
           className={`flex items-center gap-2 px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === "holidays"
-              ? "border-blue-600 text-blue-600 font-semibold"
-              : "border-transparent text-slate-600 hover:text-slate-900"
+              ? "border-blue-600 text-blue-600 dark:text-blue-400 font-semibold"
+              : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
           }`}
         >
           <Calendar className="w-4 h-4" />
@@ -470,8 +470,8 @@ export const PoliciesPage: React.FC = () => {
           onClick={() => setActiveTab("history")}
           className={`flex items-center gap-2 px-4 py-2.5 border-b-2 transition-colors ${
             activeTab === "history"
-              ? "border-blue-600 text-blue-600 font-semibold"
-              : "border-transparent text-slate-600 hover:text-slate-900"
+              ? "border-blue-600 text-blue-600 dark:text-blue-400 font-semibold"
+              : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
           }`}
         >
           <History className="w-4 h-4" />
@@ -492,14 +492,14 @@ export const PoliciesPage: React.FC = () => {
               {/* Core Parameters Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Card 1: Punctuality & Grace Period */}
-                <Card className="p-5 space-y-4 border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-2 text-slate-800 font-bold border-b border-slate-100 pb-3">
-                    <Clock className="w-5 h-5 text-blue-600" />
+                <Card className="p-5 space-y-4 border-slate-200 dark:border-slate-800 shadow-sm">
+                  <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-bold border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     <span>Punctuality & Grace</span>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                       Default Grace Period (Minutes)
                     </label>
                     <Input
@@ -514,13 +514,13 @@ export const PoliciesPage: React.FC = () => {
                       error={formErrors.defaultGraceMinutes}
                       placeholder="15"
                     />
-                    <p className="text-[11px] text-slate-500 mt-1">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                       Check-ins after shift start + grace minutes are flagged as LATE.
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                       Absence Evaluation Cutoff Time
                     </label>
                     <Input
@@ -531,13 +531,13 @@ export const PoliciesPage: React.FC = () => {
                       }
                       placeholder="23:59"
                     />
-                    <p className="text-[11px] text-slate-500 mt-1">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                       Scheduled automated job marks unpunched employees as ABSENT after this time.
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                       Organization Timezone
                     </label>
                     <Select
@@ -549,13 +549,13 @@ export const PoliciesPage: React.FC = () => {
                 </Card>
 
                 {/* Card 2: Workdays Configuration */}
-                <Card className="p-5 space-y-4 border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-2 text-slate-800 font-bold border-b border-slate-100 pb-3">
-                    <Calendar className="w-5 h-5 text-indigo-600" />
+                <Card className="p-5 space-y-4 border-slate-200 dark:border-slate-800 shadow-sm">
+                  <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-bold border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <Calendar className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                     <span>Official Workdays</span>
                   </div>
 
-                  <p className="text-xs text-slate-600">
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
                     Select the active days of the week when attendance is monitored and required.
                   </p>
 
@@ -569,12 +569,12 @@ export const PoliciesPage: React.FC = () => {
                           onClick={() => handleToggleWorkday(day.value)}
                           className={`flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg border transition-all ${
                             isSelected
-                              ? "bg-blue-50 border-blue-500 text-blue-700 shadow-xs"
-                              : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                              ? "bg-blue-50 dark:bg-blue-950/50 border-blue-500 text-blue-700 dark:text-blue-300 shadow-xs"
+                              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600"
                           }`}
                         >
                           <span>{day.label}</span>
-                          {isSelected && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                          {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
                         </button>
                       );
                     })}
@@ -585,14 +585,14 @@ export const PoliciesPage: React.FC = () => {
                 </Card>
 
                 {/* Card 3: Remote Work (WFH) Rules */}
-                <Card className="p-5 space-y-4 border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-2 text-slate-800 font-bold border-b border-slate-100 pb-3">
-                    <Home className="w-5 h-5 text-emerald-600" />
+                <Card className="p-5 space-y-4 border-slate-200 dark:border-slate-800 shadow-sm">
+                  <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-bold border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <Home className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                     <span>WFH & Duration Rules</span>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                       Monthly WFH Quota (Days / Employee)
                     </label>
                     <Input
@@ -613,7 +613,7 @@ export const PoliciesPage: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                         Full Day Threshold
                       </label>
                       <Input
@@ -625,11 +625,11 @@ export const PoliciesPage: React.FC = () => {
                           setFormData({ ...formData, minFullDayHours: Number(e.target.value) })
                         }
                       />
-                      <span className="text-[10px] text-slate-500">hours minimum</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">hours minimum</span>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                         Half Day Threshold
                       </label>
                       <Input
@@ -641,23 +641,23 @@ export const PoliciesPage: React.FC = () => {
                           setFormData({ ...formData, minHalfDayHours: Number(e.target.value) })
                         }
                       />
-                      <span className="text-[10px] text-slate-500">hours minimum</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">hours minimum</span>
                     </div>
                   </div>
                   {formErrors.minHours && (
-                    <p className="text-xs text-red-600 font-medium">{formErrors.minHours}</p>
+                    <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">{formErrors.minHours}</p>
                   )}
                 </Card>
               </div>
 
               {/* Shifts Management Section */}
-              <Card className="p-6 border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <Card className="p-6 border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                       Configured Working Shifts
                     </h3>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       Standard daytime and overnight shifts with check-in/out tolerance windows
                     </p>
                   </div>
@@ -668,7 +668,7 @@ export const PoliciesPage: React.FC = () => {
                     onClick={handleAddShift}
                     className="gap-1.5 text-xs font-semibold"
                   >
-                    <Plus className="w-4 h-4 text-blue-600" />
+                    <Plus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     Add Shift
                   </Button>
                 </div>
@@ -686,23 +686,23 @@ export const PoliciesPage: React.FC = () => {
                       return (
                         <div
                           key={shift._id || idx}
-                          className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-slate-300 transition-all space-y-3"
+                          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-3"
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div className="flex items-center gap-3 flex-1">
-                              <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center">
+                              <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center justify-center">
                                 {idx + 1}
                               </span>
                               <Input
                                 value={shift.name}
                                 onChange={(e) => handleShiftChange(idx, "name", e.target.value)}
                                 placeholder="Shift Name (e.g. Standard General)"
-                                className="font-semibold text-slate-800 bg-white"
+                                className="font-semibold text-slate-800 dark:text-slate-100"
                               />
                             </div>
 
                             <div className="flex items-center gap-2">
-                              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-white px-2.5 py-1.5 rounded-md border border-slate-200 cursor-pointer">
+                              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={shift.isOvernight}
@@ -714,7 +714,7 @@ export const PoliciesPage: React.FC = () => {
                                 <span>Overnight (crosses midnight)</span>
                               </label>
 
-                              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-white px-2.5 py-1.5 rounded-md border border-slate-200 cursor-pointer">
+                              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={shift.isActive}
@@ -730,7 +730,7 @@ export const PoliciesPage: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveShift(idx)}
-                                  className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50 transition-colors"
+                                  className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                                   title="Remove Shift"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -741,7 +741,7 @@ export const PoliciesPage: React.FC = () => {
 
                           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                                 Start Time
                               </label>
                               <Input
@@ -750,24 +750,24 @@ export const PoliciesPage: React.FC = () => {
                                 onChange={(e) =>
                                   handleShiftChange(idx, "startTime", e.target.value)
                                 }
-                                className="bg-white text-xs"
+                                className="text-xs"
                               />
                             </div>
 
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                                 End Time
                               </label>
                               <Input
                                 type="time"
                                 value={shift.endTime}
                                 onChange={(e) => handleShiftChange(idx, "endTime", e.target.value)}
-                                className="bg-white text-xs"
+                                className="text-xs"
                               />
                             </div>
 
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                                 Grace Tolerance
                               </label>
                               <div className="relative">
@@ -779,16 +779,16 @@ export const PoliciesPage: React.FC = () => {
                                   onChange={(e) =>
                                     handleShiftChange(idx, "graceMinutes", Number(e.target.value))
                                   }
-                                  className="bg-white text-xs pr-6"
+                                  className="text-xs pr-6"
                                 />
-                                <span className="absolute right-2 top-2 text-[10px] text-slate-400">
+                                <span className="absolute right-2 top-2 text-[10px] text-slate-400 dark:text-slate-500">
                                   min
                                 </span>
                               </div>
                             </div>
 
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                                 Check-in Window
                               </label>
                               <div className="relative">
@@ -803,16 +803,16 @@ export const PoliciesPage: React.FC = () => {
                                       Number(e.target.value)
                                     )
                                   }
-                                  className="bg-white text-xs pr-6"
+                                  className="text-xs pr-6"
                                 />
-                                <span className="absolute right-2 top-2 text-[10px] text-slate-400">
+                                <span className="absolute right-2 top-2 text-[10px] text-slate-400 dark:text-slate-500">
                                   min
                                 </span>
                               </div>
                             </div>
 
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                                 Check-out Window
                               </label>
                               <div className="relative">
@@ -827,9 +827,9 @@ export const PoliciesPage: React.FC = () => {
                                       Number(e.target.value)
                                     )
                                   }
-                                  className="bg-white text-xs pr-6"
+                                  className="text-xs pr-6"
                                 />
-                                <span className="absolute right-2 top-2 text-[10px] text-slate-400">
+                                <span className="absolute right-2 top-2 text-[10px] text-slate-400 dark:text-slate-500">
                                   min
                                 </span>
                               </div>
@@ -837,7 +837,7 @@ export const PoliciesPage: React.FC = () => {
                           </div>
 
                           {shiftError && (
-                            <p className="text-xs text-red-600 font-medium flex items-center gap-1">
+                            <p className="text-xs text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
                               <AlertCircle className="w-3.5 h-3.5" />
                               {shiftError}
                             </p>
@@ -855,13 +855,13 @@ export const PoliciesPage: React.FC = () => {
 
       {/* TAB 2: HOLIDAYS MANAGER */}
       {activeTab === "holidays" && (
-        <Card className="p-6 border-slate-200 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+        <Card className="p-6 border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
                 Official Company Holidays ({currentYear})
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Official holidays exempt employees from automated absentee penalties and required punches
               </p>
             </div>
@@ -876,7 +876,7 @@ export const PoliciesPage: React.FC = () => {
                 className="gap-1.5 text-xs font-semibold"
                 title="Download RFC 5545 iCalendar stream"
               >
-                <Download className="w-3.5 h-3.5 text-slate-600" />
+                <Download className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
                 Export .ICS
               </Button>
               <Link to="/calendar">
@@ -884,9 +884,9 @@ export const PoliciesPage: React.FC = () => {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="gap-1.5 text-xs font-semibold text-blue-700 border-blue-200 hover:bg-blue-50"
+                  className="gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/80 hover:bg-blue-50 dark:hover:bg-blue-950/40"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
+                  <ExternalLink className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   Working Calendar
                 </Button>
               </Link>
@@ -924,7 +924,7 @@ export const PoliciesPage: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/75 text-slate-700 font-semibold">
+                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold">
                     <th className="py-2.5 px-3">Holiday Name</th>
                     <th className="py-2.5 px-3">Date Key</th>
                     <th className="py-2.5 px-3">Recurring</th>
@@ -932,11 +932,11 @@ export const PoliciesPage: React.FC = () => {
                     <th className="py-2.5 px-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {holidays.map((h) => (
-                    <tr key={h._id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-2.5 px-3 font-semibold text-slate-900">{h.name}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-700">{h.dateKey}</td>
+                    <tr key={h._id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-slate-100">{h.name}</td>
+                      <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300">{h.dateKey}</td>
                       <td className="py-2.5 px-3">
                         {h.isRecurring ? (
                           <Badge variant="primary" className="text-[10px]">
@@ -948,14 +948,14 @@ export const PoliciesPage: React.FC = () => {
                           </Badge>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 text-slate-500">
+                      <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400">
                         {h.description || "—"}
                       </td>
                       <td className="py-2.5 px-3 text-right">
                         <button
                           type="button"
                           onClick={() => handleDeleteHoliday(h)}
-                          className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
+                          className="p-1 text-slate-400 hover:text-red-600 dark:hover:text-red-400 rounded transition-colors"
                           title="Delete Holiday"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -972,12 +972,12 @@ export const PoliciesPage: React.FC = () => {
 
       {/* TAB 3: POLICY VERSION HISTORY */}
       {activeTab === "history" && (
-        <Card className="p-6 border-slate-200 shadow-sm space-y-4">
-          <div className="border-b border-slate-100 pb-3">
-            <h3 className="text-base font-bold text-slate-900">
+        <Card className="p-6 border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
               Policy Version History & Audit Trail
             </h3>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Immutable historical policy versions retained for retroactive punch verification
             </p>
           </div>
@@ -997,24 +997,24 @@ export const PoliciesPage: React.FC = () => {
                 return (
                   <div
                     key={event._id}
-                    className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all space-y-2"
+                    className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-2"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Badge variant="primary" className="text-xs font-bold">
                           {versionNumber ? `Version ${versionNumber}` : "Policy Update"}
                         </Badge>
-                        <span className="text-xs font-semibold text-slate-800">
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
                           by {event.performedByEmployeeId || "System Admin"}
                         </span>
                       </div>
-                      <span className="text-[11px] text-slate-500">
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
                         {new Date(event.timestamp).toLocaleString()}
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-600">
-                      <span className="font-semibold text-slate-700">Reason: </span>
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">Reason: </span>
                       {event.reason || "Scheduled policy adjustment"}
                     </p>
                   </div>
@@ -1033,9 +1033,9 @@ export const PoliciesPage: React.FC = () => {
         maxWidth="md"
       >
         <div className="space-y-4">
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-xs text-amber-800">
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-800 dark:text-amber-200">
               <span className="font-bold">Notice: </span>
               Saving will increment the policy version to{" "}
               <strong className="underline">v{(activePolicy?.version || 1) + 1}</strong>. Future
@@ -1044,19 +1044,19 @@ export const PoliciesPage: React.FC = () => {
           </div>
 
           <div>
-            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-2">
               Detected Changes Summary:
             </h4>
-            <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-slate-50/50 dark:bg-slate-800/30">
               {diffSummary.map((diff, i) => (
                 <div key={i} className="p-2.5 text-xs flex items-center justify-between">
-                  <span className="font-semibold text-slate-700">{diff.label}</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">{diff.label}</span>
                   <div className="flex items-center gap-2 font-mono text-[11px]">
-                    <span className="text-slate-500 line-through bg-slate-200/60 px-1.5 py-0.5 rounded">
+                    <span className="text-slate-500 dark:text-slate-400 line-through bg-slate-200/60 dark:bg-slate-700/60 px-1.5 py-0.5 rounded">
                       {diff.from}
                     </span>
-                    <span className="text-slate-400">→</span>
-                    <span className="text-emerald-700 font-bold bg-emerald-100/70 px-1.5 py-0.5 rounded">
+                    <span className="text-slate-400 dark:text-slate-500">→</span>
+                    <span className="text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-100/70 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded">
                       {diff.to}
                     </span>
                   </div>
@@ -1066,7 +1066,7 @@ export const PoliciesPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Justification Reason (Recorded to Audit Trail)
             </label>
             <Input
@@ -1077,7 +1077,7 @@ export const PoliciesPage: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <Button
               type="button"
               variant="outline"
@@ -1111,7 +1111,7 @@ export const PoliciesPage: React.FC = () => {
       >
         <form onSubmit={handleCreateHoliday} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Holiday Name *
             </label>
             <Input
@@ -1123,7 +1123,7 @@ export const PoliciesPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Date (YYYY-MM-DD) *
             </label>
             <Input
@@ -1135,7 +1135,7 @@ export const PoliciesPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Description (Optional)
             </label>
             <Input
@@ -1145,7 +1145,7 @@ export const PoliciesPage: React.FC = () => {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
             <input
               type="checkbox"
               checked={holidayForm.isRecurring}
@@ -1155,7 +1155,7 @@ export const PoliciesPage: React.FC = () => {
             <span>Recurring Annual Holiday</span>
           </label>
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
             <Button
               type="button"
               variant="outline"
