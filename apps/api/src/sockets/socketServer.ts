@@ -137,8 +137,8 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
         }
       }
 
-      // Option C: Staff Login Public Channel (for real-time OTP status line on login page)
-      if (auth.type === "staff_login" || auth.channel === "staff_login" || auth.guest === true) {
+      // Option C: Guest / Public Channel
+      if (auth.guest === true) {
         socket.data = {
           type: "guest",
         } as AuthenticatedSocketData;

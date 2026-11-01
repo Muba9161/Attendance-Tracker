@@ -15,6 +15,11 @@ export interface IUser extends Document {
   failedLoginAttempts: number;
   lockoutUntil: Date | null;
   twoFactorRequired?: boolean;
+  isEmailVerified: boolean;
+  emailVerificationTokenHash?: string | null;
+  emailVerificationExpiresAt?: Date | null;
+  passwordResetTokenHash?: string | null;
+  passwordResetExpiresAt?: Date | null;
   refreshTokenHash: string | null;
   lastLoginAt?: Date;
   createdAt: Date;
@@ -69,6 +74,31 @@ const UserSchema = new Schema<IUser>(
     twoFactorRequired: {
       type: Boolean,
       default: false,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+      sparse: true,
+      index: true,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    passwordResetTokenHash: {
+      type: String,
+      default: null,
+      sparse: true,
+      index: true,
+    },
+    passwordResetExpiresAt: {
+      type: Date,
+      default: null,
     },
     failedLoginAttempts: {
       type: Number,

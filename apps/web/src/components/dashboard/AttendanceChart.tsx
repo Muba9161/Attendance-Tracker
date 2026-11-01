@@ -239,6 +239,9 @@ export const AttendanceChart: React.FC<AttendanceChartProps> = ({
                   verticalAlign="top"
                   height={36}
                   iconType="circle"
+                  formatter={(value) => (
+                    <span className="text-slate-700 dark:text-slate-300 font-medium">{value}</span>
+                  )}
                   wrapperStyle={{
                     fontSize: "12px",
                     paddingBottom: "8px",

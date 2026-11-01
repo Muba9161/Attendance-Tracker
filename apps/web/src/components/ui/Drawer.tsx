@@ -32,23 +32,37 @@ export const Drawer: React.FC<DrawerProps> = ({
   const { prefersReducedMotion } = useTheme();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
+      if (e.key === "Escape") {
+        onCloseRef.current();
       }
     };
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-      window.addEventListener("keydown", handleKeyDown);
-      setTimeout(() => closeBtnRef.current?.focus(), 50);
-    }
+
+    previousActiveElement.current = document.activeElement as HTMLElement;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    // Only set initial focus if focus is not already inside the drawer
+    const timer = setTimeout(() => {
+      if (drawerRef.current && !drawerRef.current.contains(document.activeElement)) {
+        closeBtnRef.current?.focus();
+      }
+    }, 50);
+
     return () => {
+      clearTimeout(timer);
       document.body.style.overflow = "unset";
       window.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement.current?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

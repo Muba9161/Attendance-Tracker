@@ -460,7 +460,7 @@ export const WfhPage: React.FC = () => {
                             type="button"
                             onClick={(e) => handleToggleSelectRow(req._id, e)}
                             className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                            aria-label={`Select request from ${req.employee?.name || req.employeeId}`}
+                            aria-label={`Select request from ${empName || req.employeeId}`}
                           >
                             {isSelected ? (
                               <CheckSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />

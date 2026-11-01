@@ -378,6 +378,7 @@ export async function runSeed(): Promise<void> {
       passwordHash: adminPasswordHash,
       role: UserRole.ADMIN,
       status: "ACTIVE",
+      isEmailVerified: true,
     });
     console.log(" Created Demo Admin user: ADM-001 (admin@vorldx.demo / +919876543210)");
   } else {
@@ -385,6 +386,7 @@ export async function runSeed(): Promise<void> {
     adminUser.role = UserRole.ADMIN;
     adminUser.mobileNumber = "+919876543210";
     adminUser.status = "ACTIVE";
+    adminUser.isEmailVerified = true;
     await adminUser.save();
     console.log(" Updated Demo Admin user: ADM-001");
   }
@@ -422,6 +424,7 @@ export async function runSeed(): Promise<void> {
       passwordHash: hrPasswordHash,
       role: UserRole.HR,
       status: "ACTIVE",
+      isEmailVerified: true,
     });
     console.log(" Created Demo HR user: HR-001 (hr@vorldx.demo / +919876543211)");
   } else {
@@ -429,6 +432,7 @@ export async function runSeed(): Promise<void> {
     hrUser.role = UserRole.HR;
     hrUser.mobileNumber = "+919876543211";
     hrUser.status = "ACTIVE";
+    hrUser.isEmailVerified = true;
     await hrUser.save();
     console.log(" Updated Demo HR user: HR-001");
   }
@@ -489,11 +493,13 @@ export async function runSeed(): Promise<void> {
         passwordHash: employeePasswordHash,
         role: UserRole.EMPLOYEE,
         status: "ACTIVE",
+        isEmailVerified: true,
       });
     } else {
       empUser.passwordHash = employeePasswordHash;
       empUser.role = UserRole.EMPLOYEE;
       empUser.status = "ACTIVE";
+      empUser.isEmailVerified = true;
       await empUser.save();
     }
 

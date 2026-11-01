@@ -1,11 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, tokenStorage, ApiError } from "../api/client";
 import { UserRole } from "@vorldx/shared";
-import {
-  getDeviceFingerprint,
-  getDeviceName,
-  getDevicePlatform,
-} from "../utils/deviceFingerprint";
 
 export interface AuthUser {
   id: string;
@@ -19,29 +14,11 @@ export interface AuthUser {
   mobileNumber?: string;
 }
 
-export interface StaffOtpStartResponse {
-  success: boolean;
-  message: string;
-  expiresInSeconds: number;
-  cooldownSeconds: number;
-  simulatedDemoOtp?: string;
-  demoNotice?: string;
-}
-
-export interface StaffOtpVerifyParams {
-  mobileNumber: string;
-  otp: string;
-  purpose?: "LOGIN" | "DEVICE_REGISTRATION" | "PASSWORD_RESET";
-  rememberDevice?: boolean;
-}
-
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: { identifier: string; password: string }) => Promise<void>;
-  requestStaffOtp: (params: { mobileNumber: string; password?: string }) => Promise<StaffOtpStartResponse>;
-  verifyStaffOtp: (params: StaffOtpVerifyParams) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -180,96 +157,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const requestStaffOtp = async (params: {
-    mobileNumber: string;
-    password?: string;
-  }): Promise<StaffOtpStartResponse> => {
-    const fp = getDeviceFingerprint();
-    const res = await api.post<StaffOtpStartResponse>("/api/auth/staff/otp-start", {
-      mobileNumber: params.mobileNumber,
-      password: params.password,
-      deviceFingerprint: fp,
-      deviceName: getDeviceName(),
-      platform: getDevicePlatform(),
-      purpose: "LOGIN",
-    });
-    return res;
-  };
-
-  const verifyStaffOtp = async (params: StaffOtpVerifyParams): Promise<void> => {
-    setIsLoading(true);
-    try {
-      const fp = getDeviceFingerprint();
-      const res = await api.post<{
-        success: boolean;
-        message: string;
-        data: {
-          accessToken: string;
-          refreshToken?: string;
-          session: {
-            id: string;
-            expiresAt: string;
-          };
-          user: {
-            _id: string;
-            employeeId: string;
-            email: string;
-            role: string;
-          };
-          employee?: {
-            name?: string;
-            department?: string;
-            designation?: string;
-            workType?: string;
-          } | null;
-        };
-      }>("/api/auth/staff/otp-verify", {
-        mobileNumber: params.mobileNumber,
-        otp: params.otp,
-        purpose: params.purpose || "LOGIN",
-        deviceFingerprint: fp,
-        deviceName: getDeviceName(),
-        platform: getDevicePlatform(),
-        rememberDevice: params.rememberDevice ?? true,
-      });
-
-      const payload = (res as any)?.data || res;
-      const { accessToken, refreshToken, session, user: staffUser, employee: staffEmp } = payload;
-      if (accessToken) {
-        tokenStorage.setTokens(accessToken, refreshToken, session?.id);
-        if (staffUser) {
-          const userData: AuthUser = {
-            id: staffUser._id || staffUser.id,
-            employeeId: staffUser.employeeId,
-            email: staffUser.email,
-            role: staffUser.role,
-            name: staffEmp?.name || staffUser.employeeId,
-            department: staffEmp?.department,
-            designation: staffEmp?.designation,
-            workType: staffEmp?.workType,
-            mobileNumber: staffEmp?.mobileNumber || staffUser.mobileNumber,
-          };
-          setUser(userData);
-          tokenStorage.setCachedUser(userData);
-        }
-        try {
-          await fetchProfile();
-        } catch {
-          // Keep authenticated user state even if background fetch profile is delayed
-        }
-      }
-    } catch (err) {
-      tokenStorage.clearTokens();
-      setUser(null);
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      throw new ApiError(400, "Unable to verify authentication code.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const logout = async (): Promise<void> => {
     try {
       const sessionId = tokenStorage.getSessionId();
@@ -295,8 +182,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!user,
         isLoading,
         login,
-        requestStaffOtp,
-        verifyStaffOtp,
         logout,
         refreshProfile: async () => {
           await fetchProfile();

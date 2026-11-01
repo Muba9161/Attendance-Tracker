@@ -74,15 +74,32 @@ export function createApp(): Express {
   // 6. Global Rate Limiter for /api
   app.use("/api", globalRateLimiter);
 
-  // 7. Core Application Routes
-  app.use(routes);
-
-  // 8. Serve HR Web Portal SPA if compiled dist exists
+  // 7. Serve HR Web Portal SPA if compiled dist exists
   const webDistPath = path.resolve(__dirname, "../../web/dist");
   if (fs.existsSync(webDistPath)) {
     app.use(express.static(webDistPath));
+
+    // Intercept direct browser navigations (Accept: text/html) so SPA routes load index.html
     app.get("*", (req, res, next) => {
-      // Don't intercept API, health, or WebSocket routes
+      const isHtmlRequest = req.headers.accept?.includes("text/html");
+      const isApiOrSystem =
+        req.path.startsWith("/api") ||
+        req.path.startsWith("/health") ||
+        req.path.startsWith("/socket.io");
+
+      if (isHtmlRequest && !isApiOrSystem) {
+        return res.sendFile(path.join(webDistPath, "index.html"));
+      }
+      next();
+    });
+  }
+
+  // 8. Core Application Routes
+  app.use(routes);
+
+  // 9. SPA Fallback for remaining unhandled GET requests
+  if (fs.existsSync(webDistPath)) {
+    app.get("*", (req, res, next) => {
       if (
         req.path.startsWith("/api") ||
         req.path.startsWith("/health") ||
