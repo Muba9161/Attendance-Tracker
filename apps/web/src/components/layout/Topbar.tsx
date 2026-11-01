@@ -213,6 +213,8 @@ export const Topbar: React.FC<TopbarProps> = ({
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
         {/* Real-Time WebSocket Status Indicator */}
         <Tooltip
+          position="bottom"
+          align="end"
           content={
             isConnected
               ? "Live Socket Gateway connected: Streaming real-time attendance scans and approvals"
@@ -383,7 +385,11 @@ export const Topbar: React.FC<TopbarProps> = ({
         </div>
 
         {/* Theme Switcher Toggle */}
-        <Tooltip content={`Theme: ${resolvedTheme === "dark" ? "Dark (Click for Light)" : "Light (Click for Dark)"}`}>
+        <Tooltip
+          position="bottom"
+          align="end"
+          content={`Theme: ${resolvedTheme === "dark" ? "Dark (Click for Light)" : "Light (Click for Dark)"}`}
+        >
           <button
             type="button"
             onClick={toggleTheme}
