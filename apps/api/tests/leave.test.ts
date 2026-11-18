@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { app } from "../src/app";
@@ -27,6 +27,7 @@ import {
 import { env } from "../src/config/env";
 import { featureFlagService } from "../src/services/featureFlag.service";
 import { evaluateAbsenceAndIncompleteJob } from "../src/services/attendance.service";
+import { createNotificationOnce } from "../src/services/notification.service";
 
 describe("Leave Management Subsystem (apps/api)", () => {
   let employeeUser: IUser;
@@ -44,6 +45,9 @@ describe("Leave Management Subsystem (apps/api)", () => {
   const simulatedNow = new Date("2026-11-05T04:30:00.000Z");
 
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(simulatedNow);
+
     // Reset database collections
     await LeaveRequest.deleteMany({});
     await LeaveBalance.deleteMany({});
@@ -126,6 +130,28 @@ describe("Leave Management Subsystem (apps/api)", () => {
       isActive: true,
     });
 
+    // Tests use explicit persisted allocations; balance GETs must not create them.
+    await LeaveBalance.create([
+      {
+        employee: employeeDoc._id,
+        type: paidLeaveType._id,
+        year: 2026,
+        allotted: 12,
+        used: 0,
+        pending: 0,
+        carriedOver: 0,
+      },
+      {
+        employee: employeeDoc._id,
+        type: sickLeaveType._id,
+        year: 2026,
+        allotted: 6,
+        used: 0,
+        pending: 0,
+        carriedOver: 0,
+      },
+    ]);
+
     employeeToken = jwt.sign(
       {
         userId: employeeUser._id.toString(),
@@ -170,6 +196,10 @@ describe("Leave Management Subsystem (apps/api)", () => {
     );
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   // ============================================================================
   // 1. FEATURE FLAG TEST
   // ============================================================================
@@ -211,6 +241,27 @@ describe("Leave Management Subsystem (apps/api)", () => {
     expect(res.body.data.carryForwardRule.maxDays).toBe(3);
   });
 
+  it("lists persisted leave types without inserting fallback types", async () => {
+    const before = await LeaveType.countDocuments({});
+    const res = await request(app)
+      .get("/api/leave/types")
+      .set("Authorization", `Bearer ${employeeToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(before);
+    expect(await LeaveType.countDocuments({})).toBe(before);
+  });
+
+  it("requires an explicit quota when a leave type is created", async () => {
+    const res = await request(app)
+      .post("/api/leave/types")
+      .set("Authorization", `Bearer ${hrToken}`)
+      .send({ name: "No Quota Leave", code: "NQL" });
+
+    expect(res.status).toBe(400);
+    expect(await LeaveType.findOne({ code: "NQL" })).toBeNull();
+  });
+
   it("should reject non-HR employees trying to configure leave types (unauthorized decision)", async () => {
     const res = await request(app)
       .post("/api/leave/types")
@@ -228,7 +279,8 @@ describe("Leave Management Subsystem (apps/api)", () => {
   // ============================================================================
   // 3. EMPLOYEE BALANCES INITIALIZATION
   // ============================================================================
-  it("should auto-seed default balances for employee when querying balances", async () => {
+  it("returns existing employee balances without creating records", async () => {
+    const countBefore = await LeaveBalance.countDocuments({ employee: employeeDoc._id });
     const res = await request(app)
       .get("/api/leave/balances/my")
       .set("Authorization", `Bearer ${employeeToken}`);
@@ -236,6 +288,7 @@ describe("Leave Management Subsystem (apps/api)", () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.balances.length).toBe(2);
+    expect(await LeaveBalance.countDocuments({ employee: employeeDoc._id })).toBe(countBefore);
 
     const pto = res.body.data.balances.find((b: any) => b.type.code === "PTO");
     expect(pto).toBeDefined();
@@ -243,6 +296,30 @@ describe("Leave Management Subsystem (apps/api)", () => {
     expect(pto.used).toBe(0);
     expect(pto.pending).toBe(0);
     expect(pto.available).toBe(12);
+  });
+
+  it("does not create a balance on GET and blocks leave applications without allocation", async () => {
+    await LeaveBalance.deleteMany({ employee: employeeDoc._id });
+
+    const balanceResponse = await request(app)
+      .get("/api/leave/balances/my")
+      .set("Authorization", `Bearer ${employeeToken}`);
+    expect(balanceResponse.status).toBe(200);
+    expect(balanceResponse.body.data.balances).toEqual([]);
+    expect(await LeaveBalance.countDocuments({ employee: employeeDoc._id })).toBe(0);
+
+    const applicationResponse = await request(app)
+      .post("/api/leave/requests")
+      .set("Authorization", `Bearer ${employeeToken}`)
+      .send({
+        type: paidLeaveType._id.toString(),
+        startDate: "2026-11-16",
+        endDate: "2026-11-16",
+        reason: "No balance allocation should prevent this request",
+      });
+    expect(applicationResponse.status).toBe(400);
+    expect(applicationResponse.body.code).toBe(ApiErrorCode.ERR_INSUFFICIENT_BALANCE);
+    expect(await LeaveBalance.countDocuments({ employee: employeeDoc._id })).toBe(0);
   });
 
   // ============================================================================
@@ -297,6 +374,48 @@ describe("Leave Management Subsystem (apps/api)", () => {
     const pto = balRes.body.data.balances.find((b: any) => b.type.code === "PTO");
     expect(pto.pending).toBe(0.5);
     expect(pto.available).toBe(11.5);
+  });
+
+  it("creates one idempotent leave notification per active HR/Admin recipient", async () => {
+    const adminUser = await User.create({
+      employeeId: "ADMIN-002",
+      email: "admin.leave@vorldx.demo",
+      passwordHash: "mock-hash",
+      role: UserRole.ADMIN,
+      status: "ACTIVE",
+    });
+    const res = await request(app)
+      .post("/api/leave/requests")
+      .set("Authorization", `Bearer ${employeeToken}`)
+      .send({
+        type: paidLeaveType._id.toString(),
+        startDate: "2026-11-23",
+        endDate: "2026-11-23",
+        reason: "Request notification idempotency test",
+      });
+
+    expect(res.status).toBe(201);
+    const requestId = res.body.data._id;
+    const notices = await Notification.find({ "payload.requestId": requestId });
+    expect(notices).toHaveLength(2);
+    expect(notices.map((notice) => notice.user.toString()).sort()).toEqual(
+      [hrUser._id.toString(), adminUser._id.toString()].sort()
+    );
+    const runDuplicateWrites = (notice: (typeof notices)[number]) =>
+      createNotificationOnce({
+        userId: notice.user,
+        eventId: notice.eventId!,
+        type: "LEAVE_STATUS",
+        title: notice.title,
+        message: notice.message,
+        payload: notice.payload,
+      });
+    const readAt = new Date();
+    await Notification.updateOne({ _id: notices[0]._id }, { $set: { readAt } });
+    await Promise.all(notices.flatMap((notice) => [runDuplicateWrites(notice), runDuplicateWrites(notice)]));
+    expect(await Notification.countDocuments({ "payload.requestId": requestId })).toBe(2);
+    expect(await Notification.countDocuments({ "payload.requestId": requestId, readAt: null })).toBe(1);
+    expect((await Notification.findById(notices[0]._id))?.readAt?.getTime()).toBe(readAt.getTime());
   });
 
   it("should reject half-day leave when leave type disallows half-days", async () => {

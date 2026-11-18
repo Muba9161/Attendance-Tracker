@@ -4,7 +4,7 @@ export interface SendMailOptions {
   html: string;
   text?: string;
   meta?: {
-    type: "EMAIL_VERIFICATION" | "PASSWORD_RESET" | "STAFF_INVITATION";
+    type: "EMAIL_VERIFICATION" | "PASSWORD_RESET" | "STAFF_INVITATION" | "SIGNUP_OTP";
     token?: string;
     actionUrl?: string;
     recipientName?: string;

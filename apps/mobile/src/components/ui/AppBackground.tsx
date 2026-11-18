@@ -19,7 +19,7 @@ export function AppBackground({ subtle = false }: { subtle?: boolean }) {
           {
             top: -180,
             right: -150,
-            backgroundColor: subtle ? 'rgba(89, 101, 242, 0.08)' : 'rgba(89, 101, 242, 0.14)',
+            backgroundColor: subtle ? 'rgba(20, 127, 181, 0.08)' : 'rgba(20, 127, 181, 0.14)',
           },
         ]}
       />
@@ -29,7 +29,7 @@ export function AppBackground({ subtle = false }: { subtle?: boolean }) {
           {
             top: 320,
             left: -210,
-            backgroundColor: subtle ? 'rgba(118, 184, 255, 0.03)' : 'rgba(118, 184, 255, 0.055)',
+            backgroundColor: subtle ? 'rgba(20, 127, 181, 0.03)' : 'rgba(20, 127, 181, 0.055)',
           },
         ]}
       />
@@ -39,7 +39,7 @@ export function AppBackground({ subtle = false }: { subtle?: boolean }) {
 
 const styles = StyleSheet.create({
   background: {
-    backgroundColor: '#07080E',
+    backgroundColor: '#142538',
     overflow: 'hidden',
   },
   glow: {

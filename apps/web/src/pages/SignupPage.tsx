@@ -11,7 +11,6 @@ import {
   EyeOff,
   AlertCircle,
   CheckCircle2,
-  ShieldCheck,
   ArrowRight,
   Sparkles,
 } from "lucide-react";
@@ -20,10 +19,15 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { isPasswordStrong } from "@vorldx/shared";
 
-const signupSchema = z
+const createSignupSchema = (isInvite: boolean) => z
   .object({
-    name: z.string().min(2, "Full name must be at least 2 characters").trim(),
-    email: z.string().email("Please enter a valid work email address").trim().toLowerCase(),
+    employeeId: z.string().trim().min(3, "Employee ID must be at least 3 characters").max(20),
+    name: isInvite
+      ? z.string().min(2, "Full name must be at least 2 characters").trim()
+      : z.string().optional(),
+    email: isInvite
+      ? z.string().email("Please enter a valid work email address").trim().toLowerCase()
+      : z.string().optional(),
     password: z
       .string()
       .min(8, "Password must be at least 8 characters")
@@ -41,7 +45,7 @@ const signupSchema = z
     path: ["confirmPassword"],
   });
 
-type SignupFormData = z.infer<typeof signupSchema>;
+type SignupFormData = z.infer<ReturnType<typeof createSignupSchema>>;
 
 interface InviteDetails {
   email: string;
@@ -71,6 +75,16 @@ export const SignupPage: React.FC = () => {
   const [signupSuccess, setSignupSuccess] = useState<boolean>(false);
   const [requiresVerification, setRequiresVerification] = useState<boolean>(true);
   const [registeredEmail, setRegisteredEmail] = useState<string>("");
+  const [requiresOtpVerification, setRequiresOtpVerification] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [signupOtp, setSignupOtp] = useState("");
+  const [signupEmployeeId, setSignupEmployeeId] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [simulatedDemoOtp, setSimulatedDemoOtp] = useState("");
+  const [signupOtpExpiresInMinutes, setSignupOtpExpiresInMinutes] = useState(10);
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
 
   const {
     register,
@@ -79,8 +93,9 @@ export const SignupPage: React.FC = () => {
     watch,
     formState: { errors },
   } = useForm<SignupFormData>({
-    resolver: zodResolver(signupSchema),
+    resolver: zodResolver(createSignupSchema(Boolean(inviteToken))),
     defaultValues: {
+      employeeId: inviteToken ? "INVITED" : "",
       name: "",
       email: "",
       password: "",
@@ -90,6 +105,12 @@ export const SignupPage: React.FC = () => {
   });
 
   const passwordValue = watch("password") || "";
+
+  useEffect(() => {
+    if (resendCountdown <= 0) return;
+    const timer = window.setTimeout(() => setResendCountdown((seconds) => seconds - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendCountdown]);
 
   // Password Strength Criteria live checks
   const hasMinLength = passwordValue.length >= 8;
@@ -151,16 +172,52 @@ export const SignupPage: React.FC = () => {
         success: boolean;
         message: string;
         requiresEmailVerification?: boolean;
-        user: { email: string; role: string };
+        requiresOtpVerification?: boolean;
+        employeeId?: string;
+        email?: string;
+        maskedEmail?: string;
+        simulatedDemoOtp?: string;
+        expiresInMinutes?: number;
+        user?: { email: string; role: string };
       }>("/api/auth/signup", {
-        name: data.name,
-        email: data.email,
+        name: inviteToken ? data.name : undefined,
+        employeeId: data.employeeId,
+        email: inviteToken ? data.email : undefined,
         password: data.password,
         inviteToken: inviteToken || undefined,
       });
 
-      setRegisteredEmail(data.email);
-      setRequiresVerification(res.requiresEmailVerification ?? !inviteToken);
+      if (res.requiresOtpVerification) {
+        const employeeId = res.employeeId || data.employeeId;
+        setSignupEmployeeId(employeeId);
+        setSignupPassword(data.password);
+        setRegisteredEmail(res.maskedEmail || res.email || "your registered employee email");
+        setSimulatedDemoOtp(res.simulatedDemoOtp || "");
+        setSignupOtpExpiresInMinutes(res.expiresInMinutes || 10);
+        setSignupOtp("");
+        setOtpVerified(false);
+        setRequiresOtpVerification(true);
+        setRequiresVerification(false);
+        setResendCountdown(60);
+        setSignupSuccess(true);
+        return;
+      }
+
+      setRegisteredEmail(data.email || "");
+      const needsVerification = res.requiresEmailVerification ?? (!inviteToken && false);
+      setRequiresVerification(needsVerification);
+
+      if (!needsVerification) {
+        // Account is active — go straight to login
+        navigate("/login", {
+          state: {
+            successMessage: "Account created successfully! Please sign in.",
+            email: data.email,
+          },
+        });
+        return;
+      }
+
       setSignupSuccess(true);
     } catch (err: unknown) {
       const errorMsg =
@@ -171,18 +228,56 @@ export const SignupPage: React.FC = () => {
     }
   };
 
+  const handleVerifySignupOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setServerError(null);
+    setIsVerifyingOtp(true);
+    try {
+      await api.post("/api/auth/register-verify", {
+        employeeId: signupEmployeeId,
+        otp: signupOtp,
+        password: signupPassword,
+      });
+      setOtpVerified(true);
+    } catch (err: unknown) {
+      setServerError(err instanceof Error ? err.message : "Unable to verify this code.");
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  const handleResendSignupOtp = async () => {
+    setServerError(null);
+    setIsResendingOtp(true);
+    try {
+      const result = await api.post<{
+        data?: { simulatedOtp?: string };
+        simulatedDemoOtp?: string;
+        expiresInMinutes?: number;
+      }>("/api/auth/register-start", { employeeId: signupEmployeeId });
+      setSimulatedDemoOtp(result.data?.simulatedOtp || result.simulatedDemoOtp || "");
+      setSignupOtpExpiresInMinutes(result.expiresInMinutes || 10);
+      setResendCountdown(60);
+      setSignupOtp("");
+    } catch (err: unknown) {
+      setServerError(err instanceof Error ? err.message : "Unable to resend the code.");
+    } finally {
+      setIsResendingOtp(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center items-center p-4 selection:bg-cyan-500 selection:text-slate-900">
       {/* Background Decorative Glow */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[720px] h-[520px] bg-gradient-to-tr from-blue-600/25 via-indigo-600/20 to-cyan-500/25 rounded-full blur-3xl opacity-75" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[720px] h-[520px] bg-gradient-to-tr from-blue-600/25 via-cyan-500/20 to-cyan-500/25 rounded-full blur-3xl opacity-75" />
       </div>
 
       <div className="relative w-full max-w-md space-y-5">
         {/* Brand Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex w-14 h-14 rounded-2xl bg-white p-2 items-center justify-center shadow-xl shadow-blue-500/25 mb-1 ring-4 ring-white/10">
-            <img src="/vorldx-logo.png" alt="VorldX" className="w-10 h-10 object-contain" />
+            <img src="/vorldx-hero-logo.webp" alt="VorldX" className="w-10 h-10 object-contain" />
           </div>
           <h1 className="text-2xl font-black tracking-tight text-white flex items-center justify-center gap-1.5">
             <span>Vorld</span>
@@ -245,7 +340,71 @@ export const SignupPage: React.FC = () => {
                 <CheckCircle2 className="w-8 h-8" />
               </div>
 
-              {requiresVerification ? (
+              {requiresOtpVerification ? (
+                otpVerified ? (
+                  <>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                      Email verified successfully
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Your account is active. You can now sign in with {registeredEmail}.
+                    </p>
+                    <Button
+                      type="button"
+                      onClick={() => navigate("/login", { state: { email: signupEmployeeId, successMessage: "Account activated. You can now sign in." } })}
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl"
+                    >
+                      Continue to Sign In
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                      Verify your email
+                    </h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Enter the 6-digit code for <strong>{registeredEmail}</strong>. It expires in {signupOtpExpiresInMinutes} minutes.
+                    </p>
+                    {simulatedDemoOtp && (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-center text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                        <strong>Demo verification code:</strong> {simulatedDemoOtp}
+                      </div>
+                    )}
+                    <form onSubmit={handleVerifySignupOtp} className="space-y-3">
+                      <input
+                        aria-label="Six-digit email verification code"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        value={signupOtp}
+                        onChange={(event) => setSignupOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                        placeholder="000000"
+                        className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-4 py-3 text-center text-2xl tracking-[0.5em] text-slate-900 dark:text-white"
+                      />
+                      <Button
+                        type="submit"
+                        disabled={signupOtp.length !== 6 || isVerifyingOtp}
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl"
+                      >
+                        {isVerifyingOtp ? "Verifying…" : "Verify code"}
+                      </Button>
+                    </form>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={resendCountdown > 0 || isResendingOtp}
+                      onClick={() => void handleResendSignupOtp()}
+                      className="w-full"
+                    >
+                      {isResendingOtp
+                        ? "Sending code…"
+                        : resendCountdown > 0
+                          ? `Resend code in ${resendCountdown}s`
+                          : "Resend code"}
+                    </Button>
+                  </>
+                )
+              ) : requiresVerification ? (
                 <>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                     Verify Your Email Address
@@ -297,6 +456,23 @@ export const SignupPage: React.FC = () => {
           ) : (
             /* REGISTRATION FORM */
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              {!inviteToken && (
+                <div>
+                  <label htmlFor="employeeId" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Employee ID
+                  </label>
+                  <input
+                    id="employeeId"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter your Employee ID"
+                    {...register("employeeId")}
+                    className={`w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.employeeId ? "border-rose-500" : "border-slate-200 dark:border-slate-700"}`}
+                  />
+                  {errors.employeeId && <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">{errors.employeeId.message}</p>}
+                </div>
+              )}
+              {inviteToken && <>
               {/* Full Name */}
               <div>
                 <label
@@ -313,11 +489,10 @@ export const SignupPage: React.FC = () => {
                     autoComplete="name"
                     placeholder="Jane Doe"
                     {...register("name")}
-                    className={`w-full pl-9 pr-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-                      errors.name
+                    className={`w-full pl-9 pr-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${errors.name
                         ? "border-rose-500 focus:ring-rose-500"
                         : "border-slate-200 dark:border-slate-700"
-                    }`}
+                      }`}
                   />
                 </div>
                 {errors.name && (
@@ -345,13 +520,11 @@ export const SignupPage: React.FC = () => {
                     placeholder="name@company.com"
                     readOnly={!!inviteDetails?.email}
                     {...register("email")}
-                    className={`w-full pl-9 pr-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-                      inviteDetails?.email ? "bg-slate-100 dark:bg-slate-800/40 cursor-not-allowed" : ""
-                    } ${
-                      errors.email
+                    className={`w-full pl-9 pr-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${inviteDetails?.email ? "bg-slate-100 dark:bg-slate-800/40 cursor-not-allowed" : ""
+                      } ${errors.email
                         ? "border-rose-500 focus:ring-rose-500"
                         : "border-slate-200 dark:border-slate-700"
-                    }`}
+                      }`}
                   />
                 </div>
                 {errors.email && (
@@ -360,6 +533,7 @@ export const SignupPage: React.FC = () => {
                   </p>
                 )}
               </div>
+              </>}
 
               {/* Password */}
               <div>
@@ -377,11 +551,10 @@ export const SignupPage: React.FC = () => {
                     autoComplete="new-password"
                     placeholder="Create a strong password"
                     {...register("password")}
-                    className={`w-full pl-9 pr-10 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-                      errors.password
+                    className={`w-full pl-9 pr-10 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${errors.password
                         ? "border-rose-500 focus:ring-rose-500"
                         : "border-slate-200 dark:border-slate-700"
-                    }`}
+                      }`}
                   />
                   <button
                     type="button"
@@ -449,11 +622,10 @@ export const SignupPage: React.FC = () => {
                     autoComplete="new-password"
                     placeholder="Re-enter password"
                     {...register("confirmPassword")}
-                    className={`w-full pl-9 pr-10 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-                      errors.confirmPassword
+                    className={`w-full pl-9 pr-10 py-2 text-sm bg-slate-50 dark:bg-slate-800 border rounded-xl text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${errors.confirmPassword
                         ? "border-rose-500 focus:ring-rose-500"
                         : "border-slate-200 dark:border-slate-700"
-                    }`}
+                      }`}
                   />
                   <button
                     type="button"
@@ -526,10 +698,9 @@ export const SignupPage: React.FC = () => {
           )}
         </Card>
 
-        {/* Security Assurance Footer */}
-        <div className="text-center text-xs text-slate-500 dark:text-slate-400 flex items-center justify-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-cyan-400" />
-          <span>Single-use encrypted tokens & enterprise RBAC isolation</span>
+        {/* Company Copyright Footer */}
+        <div className="text-center text-xs text-slate-500 dark:text-slate-400">
+          <span>© 2026 VORLDX INDUSTRIES PRIVATE LIMITED. All rights reserved.</span>
         </div>
       </div>
     </div>

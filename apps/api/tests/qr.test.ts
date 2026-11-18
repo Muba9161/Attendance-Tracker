@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { app } from "../src/app";
-import { QrDisplay, QrToken, AuditEvent, User } from "../src/models";
+import { QrDisplay, QrToken, AuditEvent, User, AttendancePolicy, AttendanceRecord } from "../src/models";
 import { ApiErrorCode, UserRole, TerminalStatus } from "@vorldx/shared";
 import { env } from "../src/config/env";
 import * as qrService from "../src/services/qr.service";
@@ -77,6 +77,49 @@ describe("Dynamic QR Code & Display Terminal Engine", () => {
   });
 
   describe("Display Registration & Pairing Lifecycle", () => {
+    it("archives only the selected display and preserves its audit and attendance history", async () => {
+      const first = await qrService.registerDisplay({ name: "Archive Me", location: "Lobby" });
+      const second = await qrService.registerDisplay({ name: "Keep Me", location: "Reception" });
+      await AuditEvent.create({
+        entityType: "TERMINAL",
+        entityId: first._id,
+        action: "CREATE",
+        metadata: { terminalId: first.terminalId },
+      });
+      await AttendanceRecord.create({
+        employee: new User()._id,
+        employeeId: "EMP-HISTORY",
+        department: "Operations",
+        dateKey: "2026-11-18",
+        terminalId: first.terminalId,
+      });
+
+      const archiveRes = await request(app)
+        .delete(`/api/displays/${first.terminalId}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ reason: "Kiosk decommissioned" });
+
+      expect(archiveRes.status).toBe(200);
+      expect(archiveRes.body.success).toBe(true);
+      expect(archiveRes.body.data.status).toBe(TerminalStatus.REVOKED);
+      expect(await QrDisplay.countDocuments({ terminalId: first.terminalId })).toBe(1);
+      expect(await QrDisplay.findOne({ terminalId: first.terminalId }).then((item) => item?.archivedAt)).toBeTruthy();
+      expect(await AttendanceRecord.countDocuments({ terminalId: first.terminalId })).toBe(1);
+      expect(await AuditEvent.countDocuments({ entityType: "TERMINAL", entityId: first._id })).toBe(2);
+
+      const listRes = await request(app)
+        .get("/api/displays")
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data.map((display: { terminalId: string }) => display.terminalId)).toEqual([second.terminalId]);
+      expect((await QrDisplay.findOne({ terminalId: second.terminalId }))?.archivedAt).toBeFalsy();
+
+      const reauthorizeRes = await request(app)
+        .post(`/api/displays/${first.terminalId}/authorize`)
+        .set("Authorization", `Bearer ${adminToken}`);
+      expect(reauthorizeRes.status).toBe(404);
+    });
+
     it("allows HR to register a display, receive pairing code, and pairs display via one-time code", async () => {
       // 1. HR registers a new display
       const regRes = await request(app)
@@ -179,14 +222,21 @@ describe("Dynamic QR Code & Display Terminal Engine", () => {
       const pair = await qrService.pairDisplay(reg.pairingCode!);
 
       const res = await request(app)
-        .get("/api/displays/token")
+        .post("/api/displays/token")
         .set("x-display-id", pair.displayId)
-        .set("x-display-credential", pair.credential);
+        .set("x-display-credential", pair.credential)
+        .send({});
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.token).toMatch(/^qrt_/);
+      expect(res.body.qrPayload).toBe(res.body.token);
+      expect(res.body.terminalId).toBe(pair.displayId);
+      expect(res.body.issuedAt).toEqual(expect.any(String));
+      expect(Number.isFinite(Date.parse(res.body.expiresAt))).toBe(true);
+      expect(Number.isFinite(res.body.serverTime)).toBe(true);
       expect(res.body.displayId).toBe(pair.displayId);
+      expect(res.body.rotationSeconds).toBe(env.QR_ROTATION_SECONDS);
       expect(res.body.ttlSeconds).toBe(45); // Default 45 seconds
 
       // Verify token contains no sensitive employee data or passwords
@@ -200,6 +250,52 @@ describe("Dynamic QR Code & Display Terminal Engine", () => {
       expect(storedToken).toBeDefined();
       expect(storedToken?.displayId).toBe(pair.displayId);
       expect(storedToken?.isRevoked).toBe(false);
+    });
+
+    it("issues a fresh challenge after the previous challenge expires using the same display credentials", async () => {
+      const reg = await qrService.registerDisplay({ name: "Recovery Screen", location: "Lobby" });
+      const pair = await qrService.pairDisplay(reg.pairingCode!);
+      const expired = await qrService.requestRotatingChallenge(pair.displayId, pair.credential);
+      await QrToken.updateOne(
+        { token: expired.token },
+        { $set: { expiresAt: new Date(Date.now() - 1000) } }
+      );
+
+      const refresh = await request(app)
+        .post("/api/displays/token")
+        .set("x-display-id", pair.displayId)
+        .set("x-display-credential", pair.credential)
+        .send({});
+
+      expect(refresh.status).toBe(200);
+      expect(refresh.body.success).toBe(true);
+      expect(refresh.body.token).toMatch(/^qrt_/);
+      expect(refresh.body.token).not.toBe(expired.token);
+      expect(Date.parse(refresh.body.expiresAt)).toBeGreaterThan(Date.now());
+    });
+
+    it("uses the active attendance policy for QR rotation and expiry timing", async () => {
+      await AttendancePolicy.create({
+        name: "Custom QR Timing Policy",
+        timezone: "Asia/Kolkata",
+        defaultGraceMinutes: 15,
+        minFullDayHours: 8,
+        minHalfDayHours: 4,
+        monthlyWfhQuota: 4,
+        qrRotationSeconds: 20,
+        qrGraceSeconds: 10,
+        isDefault: true,
+      });
+      const reg = await qrService.registerDisplay({ name: "Timed Screen", location: "Lobby" });
+      const pair = await qrService.pairDisplay(reg.pairingCode!);
+
+      const challenge = await qrService.requestRotatingChallenge(pair.displayId, pair.credential);
+
+      expect(challenge.rotationSeconds).toBe(20);
+      expect(challenge.ttlSeconds).toBe(30);
+      expect(new Date(challenge.expiresAt).getTime() - new Date(challenge.issuedAt).getTime()).toBe(
+        30000
+      );
     });
   });
 

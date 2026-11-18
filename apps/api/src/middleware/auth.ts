@@ -24,7 +24,7 @@ declare global {
  * - ERR_TOKEN_EXPIRED (401) when access token has expired
  * - ERR_UNAUTHORIZED (401) when token is missing or malformed
  */
-export const authenticate = (req: Request, _res: Response, next: NextFunction): void => {
+export const authenticate = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   const authHeader = req.headers.authorization;
   let token: string | undefined;
 
@@ -35,21 +35,40 @@ export const authenticate = (req: Request, _res: Response, next: NextFunction): 
   }
 
   if (!token) {
-    throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    next(AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED));
+    return;
+  }
+
+  let decoded: TokenPayload;
+  try {
+    decoded = jwt.verify(token, env.JWT_SECRET) as TokenPayload;
+  } catch (error) {
+    next(error instanceof TokenExpiredError
+      ? new AppError(401, ApiErrorCode.ERR_TOKEN_EXPIRED, "Access token has expired")
+      : AppError.unauthorized("Invalid or malformed authentication token", ApiErrorCode.ERR_UNAUTHORIZED));
+    return;
+  }
+
+  if (!decoded.userId || !Types.ObjectId.isValid(decoded.userId)) {
+    next(AppError.unauthorized("Invalid or malformed authentication token", ApiErrorCode.ERR_UNAUTHORIZED));
+    return;
   }
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as TokenPayload;
-    req.user = decoded;
+    const user = await User.findById(decoded.userId).select("employeeId email role status");
+    if (!user || user.status !== "ACTIVE") {
+      next(AppError.unauthorized("Account is inactive or unavailable", ApiErrorCode.ERR_SESSION_REVOKED));
+      return;
+    }
+    req.user = {
+      ...decoded,
+      employeeId: user.employeeId,
+      email: user.email,
+      role: user.role,
+    };
     next();
   } catch (error) {
-    if (error instanceof TokenExpiredError) {
-      throw new AppError(401, ApiErrorCode.ERR_TOKEN_EXPIRED, "Access token has expired");
-    }
-    throw AppError.unauthorized(
-      "Invalid or malformed authentication token",
-      ApiErrorCode.ERR_UNAUTHORIZED
-    );
+    next(error);
   }
 };
 
@@ -70,8 +89,7 @@ export const requireRole = (...allowedRoles: (UserRole | string)[]) => {
     const isMatch =
       normalizedAllowed.includes(userRole) ||
       userRole === "ADMIN" ||
-      (userRole === "HR_ADMIN" && normalizedAllowed.includes("HR")) ||
-      (userRole === "HR" && normalizedAllowed.includes("HR_ADMIN"));
+      (userRole === "HR_ADMIN" && normalizedAllowed.includes("HR"));
 
     if (!isMatch) {
       throw AppError.forbidden(

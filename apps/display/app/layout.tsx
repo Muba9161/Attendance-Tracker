@@ -17,7 +17,7 @@ export const viewport: Viewport = {
 export default function DisplayLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-brand-950 text-slate-100 min-h-screen select-none font-sans antialiased overflow-hidden">
+      <body className="bg-brand-950 text-slate-100 min-h-[100svh] select-none font-sans antialiased">
         {children}
       </body>
     </html>

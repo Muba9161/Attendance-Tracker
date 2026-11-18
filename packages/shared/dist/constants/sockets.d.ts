@@ -3,6 +3,7 @@
  */
 export declare const SocketEvent: {
     readonly ATTENDANCE_UPDATED: "attendance.updated";
+    readonly ATTENDANCE_DISPLAY_CONFIRMATION: "attendance.display_confirmation";
     readonly WFH_DECIDED: "wfh.decided";
     readonly WFH_CREATED: "wfh.created";
     readonly EMPLOYEE_REGISTERED: "employee.registered";
@@ -74,8 +75,19 @@ export interface AttendanceUpdatedPayload {
     durationMinutes: number;
     message?: string;
 }
+export interface AttendanceDisplayConfirmationPayload {
+    recordId: string;
+    terminalId: string;
+    employeeName: string;
+    maskedEmployeeId: string;
+    punchType: "CHECK_IN" | "CHECK_OUT";
+    timestamp: string;
+    timeZone: string;
+}
 export interface WfhCreatedPayload {
     requestId: string;
+    /** Stable identity for this submission occurrence (including resubmissions). */
+    eventId?: string;
     employeeId: string;
     employeeName?: string;
     department?: string;

@@ -13,7 +13,7 @@ exports.QrPayloadSchema = zod_1.z.object({
 });
 exports.TerminalCreateRequestSchema = zod_1.z.object({
     name: zod_1.z.string().min(2, "Terminal name must be at least 2 characters").max(100),
-    location: zod_1.z.string().min(2, "Location description is required").max(100),
+    location: zod_1.z.string().trim().min(2, "Location description is required").max(200),
 });
 exports.TerminalPairRequestSchema = zod_1.z.object({
     pairingCode: zod_1.z.string().trim().min(4, "Pairing code is required").max(12),

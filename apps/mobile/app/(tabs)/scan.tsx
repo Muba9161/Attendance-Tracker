@@ -4,6 +4,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   Animated,
+  Modal,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Linking from 'expo-linking';
@@ -32,7 +35,7 @@ import { attendanceApi, ApiError } from '../../src/services';
 
 const FRAME_SIZE = 218;
 
-function ScannerOverlay({ paused }: { paused: boolean }) {
+function ScannerOverlay({ paused, size }: { paused: boolean; size: number }) {
   const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -57,11 +60,11 @@ function ScannerOverlay({ paused }: { paused: boolean }) {
 
   const translateY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, FRAME_SIZE - 6],
+    outputRange: [0, size - 6],
   });
 
   return (
-    <View pointerEvents="none" style={styles.scanFrame}>
+      <View pointerEvents="none" style={[styles.scanFrame, { width: size, height: size }]}>
       <View style={[styles.corner, styles.cornerTopLeft]} />
       <View style={[styles.corner, styles.cornerTopRight]} />
       <View style={[styles.corner, styles.cornerBottomLeft]} />
@@ -73,11 +76,18 @@ function ScannerOverlay({ paused }: { paused: boolean }) {
 
 export default function ScanScreen() {
   const router = useRouter();
-  const { isWide } = useResponsive();
+  const { isWide, height } = useResponsive();
+  const viewfinderHeight = Math.min(380, Math.max(190, height * 0.42));
+  const scanFrameSize = Math.min(FRAME_SIZE, viewfinderHeight - spacing.lg * 2);
   const [permission, requestPermission] = useCameraPermissions();
 
   const [torch, setTorch] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [earlyCheckout, setEarlyCheckout] = useState<{
+    token: string; employeeName: string; employeeId: string; shiftName: string;
+    scheduledShiftEndTime: string; currentCheckoutTime: string;
+  } | null>(null);
+  const [earlyCheckoutReason, setEarlyCheckoutReason] = useState('');
 
   const [scanResult, setScanResult] = useState<{
     tone: Tone;
@@ -91,6 +101,8 @@ export default function ScanScreen() {
     isProcessingRef.current = false;
     setIsSubmitting(false);
     setScanResult(null);
+    setEarlyCheckout(null);
+    setEarlyCheckoutReason('');
   };
 
   /**
@@ -98,7 +110,7 @@ export default function ScanScreen() {
    * STRICT SECURITY REQUIREMENT: Never sends a client timestamp!
    */
   const processToken = useCallback(
-    async (rawToken: string) => {
+    async (rawToken: string, reason?: string) => {
       let cleanToken = rawToken.trim();
       if (!cleanToken) return;
 
@@ -115,7 +127,7 @@ export default function ScanScreen() {
       setScanResult(null);
 
       try {
-        const res = await attendanceApi.scanAttendance(cleanToken);
+        const res = await attendanceApi.scanAttendance(cleanToken, reason);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
 
         const isOut = res.punchType === 'CHECK_OUT';
@@ -129,9 +141,26 @@ export default function ScanScreen() {
               : 'Attendance punch successfully registered at terminal.'),
         });
       } catch (err: unknown) {
+        if (reason) {
+          setEarlyCheckout(null);
+          setEarlyCheckoutReason('');
+        }
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
         if (err instanceof ApiError) {
           const code = err.code || 'ERR_REQUEST_FAILED';
+          if (code === 'ERR_EARLY_CHECKOUT_REASON_REQUIRED') {
+            const details = (err.details || {}) as Record<string, string | undefined>;
+            setEarlyCheckout({
+              token: cleanToken,
+              employeeName: details.employeeName || 'Employee',
+              employeeId: details.employeeId || '',
+              shiftName: details.shiftName || 'Assigned shift',
+              scheduledShiftEndTime: details.scheduledShiftEndTime || '',
+              currentCheckoutTime: details.currentCheckoutTime || '',
+            });
+            setEarlyCheckoutReason('');
+            return;
+          }
           if (code === 'ERR_QR_EXPIRED') {
             setScanResult({
               tone: 'warning',
@@ -182,7 +211,7 @@ export default function ScanScreen() {
 
       <View style={[styles.container, isWide && styles.containerWide]}>
         {/* Camera Viewport Frame */}
-        <View style={styles.viewfinderCard}>
+        <View style={[styles.viewfinderCard, { height: viewfinderHeight }]}>
           {!permission ? (
             <View style={styles.permissionState}>
               <ActivityIndicator color={colors.indigoSoft} />
@@ -218,7 +247,7 @@ export default function ScanScreen() {
                 style={StyleSheet.absoluteFill}
               />
               <View pointerEvents="none" style={styles.cameraShade} />
-              <ScannerOverlay paused={Boolean(scanResult || isSubmitting)} />
+              <ScannerOverlay paused={Boolean(scanResult || isSubmitting)} size={scanFrameSize} />
             </>
           )}
 
@@ -298,6 +327,41 @@ export default function ScanScreen() {
             </View>
           ) : null}
         </View>
+        <Modal visible={Boolean(earlyCheckout)} transparent animationType="fade" onRequestClose={() => { setEarlyCheckout(null); resetScanner(); }}>
+          <View style={styles.reasonBackdrop}>
+            <View style={styles.reasonCard}>
+              <Text variant="subheading">Early Checkout</Text>
+              <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 380 }}>
+                <Text variant="small" color={colors.textSecondary} style={{ marginTop: 10 }}>
+                  You are checking out before your scheduled shift ends. Please provide a reason for early checkout.
+                </Text>
+                <Text variant="small" color={colors.text} style={{ marginTop: 12 }}>Employee: {earlyCheckout?.employeeName} {earlyCheckout?.employeeId ? `(${earlyCheckout.employeeId})` : ''}</Text>
+                <Text variant="small" color={colors.text} style={{ marginTop: 6 }}>Shift: {earlyCheckout?.shiftName}</Text>
+                <Text variant="small" color={colors.text} style={{ marginTop: 6 }}>Scheduled end: {earlyCheckout?.scheduledShiftEndTime ? new Date(earlyCheckout.scheduledShiftEndTime).toLocaleString() : 'Unavailable'}</Text>
+                <Text variant="small" color={colors.text} style={{ marginTop: 6 }}>Current checkout time: {earlyCheckout?.currentCheckoutTime ? new Date(earlyCheckout.currentCheckoutTime).toLocaleString() : 'Now'}</Text>
+                <TextInput
+                  accessibilityLabel="Reason for early checkout"
+                  value={earlyCheckoutReason}
+                  onChangeText={(value) => setEarlyCheckoutReason(value.slice(0, 500))}
+                  placeholder="Enter reason (required)"
+                  placeholderTextColor={colors.muted}
+                  multiline
+                  maxLength={500}
+                  editable={!isSubmitting}
+                  style={styles.reasonInput}
+                />
+                <Text variant="caption" color={colors.muted} align="right">{earlyCheckoutReason.length}/500</Text>
+              </ScrollView>
+              <View style={styles.reasonActions}>
+                <Button label="Cancel" variant="secondary" size="sm" disabled={isSubmitting} onPress={() => { setEarlyCheckout(null); resetScanner(); }} style={{ flex: 1 }} />
+                <Button label="Confirm Checkout" size="sm" loading={isSubmitting} disabled={isSubmitting || !earlyCheckoutReason.trim()} onPress={() => {
+                  if (!earlyCheckout || !earlyCheckoutReason.trim() || isSubmitting) return;
+                  void processToken(earlyCheckout.token, earlyCheckoutReason.trim());
+                }} style={{ flex: 1 }} />
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </Screen>
   );
@@ -326,14 +390,14 @@ const styles = StyleSheet.create({
   },
   cameraShade: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(7, 8, 14, 0.42)',
+    backgroundColor: 'rgba(20, 37, 56, 0.42)',
   },
   scanFrame: {
     width: FRAME_SIZE,
     height: FRAME_SIZE,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.25)',
+    borderColor: 'rgba(20, 127, 181, 0.25)',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -375,9 +439,9 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: radii.pill,
-    backgroundColor: 'rgba(7, 8, 14, 0.72)',
+    backgroundColor: 'rgba(20, 37, 56, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.3)',
+    borderColor: 'rgba(20, 127, 181, 0.3)',
   },
   torchBtn: {
     width: 36,
@@ -385,7 +449,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(7, 8, 14, 0.72)',
+    backgroundColor: 'rgba(20, 37, 56, 0.72)',
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -393,7 +457,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(7, 8, 14, 0.65)',
+    backgroundColor: 'rgba(20, 37, 56, 0.65)',
   },
   submittingPill: {
     flexDirection: 'row',
@@ -443,7 +507,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(89, 101, 242, 0.1)',
+    backgroundColor: 'rgba(20, 127, 181, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xs,
@@ -479,4 +543,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingTop: spacing.xs,
   },
+  reasonBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: 'rgba(0,0,0,0.72)' },
+  reasonCard: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radii.xl, padding: spacing.lg, gap: spacing.md, maxWidth: 520, width: '100%', alignSelf: 'center' },
+  reasonInput: { minHeight: 88, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, color: colors.text, backgroundColor: colors.bg, padding: spacing.md, textAlignVertical: 'top', marginTop: spacing.md },
+  reasonActions: { flexDirection: 'row', gap: spacing.sm },
 });

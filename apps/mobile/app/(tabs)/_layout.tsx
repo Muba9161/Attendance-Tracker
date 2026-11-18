@@ -49,7 +49,7 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.text,
         tabBarInactiveTintColor: colors.muted,
         tabBarHideOnKeyboard: true,
-        tabBarActiveBackgroundColor: isWide ? 'rgba(89, 101, 242, 0.12)' : 'transparent',
+        tabBarActiveBackgroundColor: isWide ? 'rgba(20, 127, 181, 0.12)' : 'transparent',
         tabBarStyle: isWide
           ? [
               styles.sideBar,
@@ -141,7 +141,7 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   bottomBar: {
-    backgroundColor: 'rgba(10, 12, 21, 0.98)',
+    backgroundColor: 'rgba(23, 42, 62, 0.98)',
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: 7,
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconWrapActive: {
-    backgroundColor: 'rgba(89, 101, 242, 0.16)',
+    backgroundColor: 'rgba(20, 127, 181, 0.16)',
   },
   label: {
     fontFamily: fonts.medium,

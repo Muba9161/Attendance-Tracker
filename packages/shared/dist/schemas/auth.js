@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VerifyInviteRequestSchema = exports.StaffInviteRequestSchema = exports.ResendVerificationRequestSchema = exports.VerifyEmailRequestSchema = exports.ResetPasswordRequestSchema = exports.ForgotPasswordRequestSchema = exports.SignupRequestSchema = exports.AuthUserSchema = exports.RefreshTokenRequestSchema = exports.LoginRequestSchema = exports.VerifyOtpRequestSchema = exports.RegisterRequestSchema = exports.RegisterCompleteRequestSchema = exports.RegisterVerifyRequestSchema = exports.RegisterStartRequestSchema = void 0;
+exports.VerifyInviteRequestSchema = exports.StaffInviteRequestSchema = exports.ResendSignupOtpRequestSchema = exports.VerifySignupOtpRequestSchema = exports.ResendVerificationRequestSchema = exports.VerifyEmailRequestSchema = exports.ResetPasswordRequestSchema = exports.ForgotPasswordRequestSchema = exports.SignupRequestSchema = exports.AuthUserSchema = exports.RefreshTokenRequestSchema = exports.LoginRequestSchema = exports.VerifyOtpRequestSchema = exports.RegisterRequestSchema = exports.RegisterCompleteRequestSchema = exports.RegisterVerifyRequestSchema = exports.RegisterStartRequestSchema = void 0;
 exports.isPasswordStrong = isPasswordStrong;
 const zod_1 = require("zod");
 const enums_1 = require("../constants/enums");
@@ -95,7 +95,8 @@ function isPasswordStrong(password) {
     return hasUpper && hasLower && hasNumberOrSymbol;
 }
 exports.SignupRequestSchema = zod_1.z.object({
-    email: zod_1.z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+    employeeId: zod_1.z.string().trim().min(3, "Employee ID must be at least 3 characters").max(20).optional(),
+    email: zod_1.z.string().trim().email("Please provide a valid corporate email address").toLowerCase().optional(),
     password: zod_1.z
         .string()
         .min(8, "Password must be at least 8 characters")
@@ -103,8 +104,30 @@ exports.SignupRequestSchema = zod_1.z.object({
         .refine(isPasswordStrong, {
         message: "Password must contain at least one uppercase letter, one lowercase letter, and one number or special character",
     }),
-    name: zod_1.z.string().trim().min(2, "Full name must be at least 2 characters").max(100),
+    name: zod_1.z.string().trim().min(2, "Full name must be at least 2 characters").max(100).optional(),
     inviteToken: zod_1.z.string().trim().optional(),
+}).superRefine((data, context) => {
+    if (!data.inviteToken && !data.employeeId) {
+        context.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ["employeeId"],
+            message: "Employee ID is required for employee registration.",
+        });
+    }
+    if (data.inviteToken && !data.email) {
+        context.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ["email"],
+            message: "Email is required to accept a staff invitation.",
+        });
+    }
+    if (data.inviteToken && !data.name) {
+        context.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ["name"],
+            message: "Name is required to accept a staff invitation.",
+        });
+    }
 });
 exports.ForgotPasswordRequestSchema = zod_1.z.object({
     email: zod_1.z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
@@ -124,6 +147,13 @@ exports.VerifyEmailRequestSchema = zod_1.z.object({
 });
 exports.ResendVerificationRequestSchema = zod_1.z.object({
     email: zod_1.z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+});
+exports.VerifySignupOtpRequestSchema = zod_1.z.object({
+    email: zod_1.z.string().trim().email().toLowerCase(),
+    otp: zod_1.z.string().trim().regex(/^\d{6}$/, "OTP must contain exactly 6 digits"),
+});
+exports.ResendSignupOtpRequestSchema = zod_1.z.object({
+    email: zod_1.z.string().trim().email().toLowerCase(),
 });
 exports.StaffInviteRequestSchema = zod_1.z.object({
     email: zod_1.z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),

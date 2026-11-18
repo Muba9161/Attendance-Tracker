@@ -11,12 +11,8 @@ import { ApiErrorCode } from "@vorldx/shared";
 export class AuthController {
   public registerStart = asyncHandler(async (req: Request, res: Response) => {
     const { employeeId } = req.body;
-    if (!employeeId) {
-      throw AppError.badRequest("Employee ID is required", ApiErrorCode.ERR_INVALID_INPUT);
-    }
-
-    const result = await authService.startRegistration(employeeId);
-
+    if (!employeeId) throw AppError.badRequest("Employee ID is required", ApiErrorCode.ERR_INVALID_INPUT);
+    const result = await authService.startRegistration(employeeId, false);
     const responsePayload: Record<string, unknown> = {
       success: true,
       message: result.isDemoMode
@@ -33,16 +29,34 @@ export class AuthController {
         expiresInMinutes: result.expiresInMinutes,
       },
     };
-
     if (result.isDemoMode && result.simulatedDemoOtp) {
       responsePayload.simulatedDemoOtp = result.simulatedDemoOtp;
-      responsePayload.demoNotice =
-        "SIMULATED OTP FOR DEMO ENVIRONMENT ONLY â€” NEVER RETURNED IN PRODUCTION";
+      responsePayload.demoNotice = "SIMULATED OTP FOR DEMO ENVIRONMENT ONLY — NEVER RETURNED IN PRODUCTION";
     }
-
     res.status(200).json(responsePayload);
   });
 
+  public mobileRegisterStart = asyncHandler(async (req: Request, res: Response) => {
+    const { employeeId } = req.body;
+    if (!employeeId) throw AppError.badRequest("Employee ID is required", ApiErrorCode.ERR_INVALID_INPUT);
+    const result = await authService.startRegistration(employeeId, true);
+    res.status(200).json({ success: true, message: "Verification code sent to registered employee email.", data: {
+      employeeId: result.employeeId,
+      maskedEmail: result.email.replace(/(?<=.{2}).(?=[^@]*?@)/g, "*"),
+      expiresInMinutes: result.expiresInMinutes,
+      resendAfterSeconds: result.resendAfterSeconds,
+    } });
+  });
+
+  public registerResend = asyncHandler(async (req: Request, res: Response) => {
+    const result = await authService.resendRegistrationOtp(req.body.employeeId);
+    res.status(200).json({ success: true, message: "Verification code sent to registered employee email.", data: {
+      employeeId: result.employeeId,
+      maskedEmail: result.email.replace(/(?<=.{2}).(?=[^@]*?@)/g, "*"),
+      expiresInMinutes: result.expiresInMinutes,
+      resendAfterSeconds: result.resendAfterSeconds,
+    } });
+  });
   public registerVerify = asyncHandler(async (req: Request, res: Response) => {
     const { employeeId, otp, password } = req.body;
     if (!employeeId || !otp) {
@@ -267,9 +281,19 @@ export class AuthController {
   });
 
   public signup = asyncHandler(async (req: Request, res: Response) => {
-    const { email, password, name, inviteToken } = req.body;
-    const result = await authService.signup({ email, password, name, inviteToken });
+    const { employeeId, email, password, name, inviteToken } = req.body;
+    const result = await authService.signup({ employeeId, email, password, name, inviteToken });
     res.status(201).json(result);
+  });
+
+  public verifySignupOtp = asyncHandler(async (req: Request, res: Response) => {
+    const result = await authService.verifySignupOtp(req.body.email, req.body.otp);
+    res.status(200).json(result);
+  });
+
+  public resendSignupOtp = asyncHandler(async (req: Request, res: Response) => {
+    const result = await authService.resendSignupOtp(req.body.email);
+    res.status(200).json(result);
   });
 
   public verifyEmail = asyncHandler(async (req: Request, res: Response) => {
@@ -303,6 +327,56 @@ export class AuthController {
     }
     const result = await authService.createStaffInvite(adminUserId, req.body);
     res.status(201).json(result);
+  });
+
+  public createHrAccount = asyncHandler(async (req: Request, res: Response) => {
+    const adminUserId = req.user?.userId;
+    if (!adminUserId) {
+      throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    }
+    const result = await authService.createHrAccountWithPassword(adminUserId, req.body);
+    res.status(201).json(result);
+  });
+
+  public listHrManagement = asyncHandler(async (_req: Request, res: Response) => {
+    const records = await authService.listHrManagementRecords();
+    res.status(200).json({ success: true, data: records });
+  });
+
+  public resendHrInvitation = asyncHandler(async (req: Request, res: Response) => {
+    const adminUserId = req.user?.userId;
+    if (!adminUserId) {
+      throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    }
+    const result = await authService.resendHrInvitation(adminUserId, req.params.recordId);
+    res.status(200).json(result);
+  });
+
+  public setHrAccountStatus = asyncHandler(async (req: Request, res: Response) => {
+    const adminUserId = req.user?.userId;
+    if (!adminUserId) {
+      throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    }
+    const result = await authService.setHrAccountStatus(adminUserId, req.params.userId, req.body.status);
+    res.status(200).json({ success: true, data: result });
+  });
+
+  public updateHrManagementRecord = asyncHandler(async (req: Request, res: Response) => {
+    const adminUserId = req.user?.userId;
+    if (!adminUserId) {
+      throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    }
+    const result = await authService.updateHrManagementRecord(adminUserId, req.params.recordId, req.body);
+    res.status(200).json({ success: true, data: result });
+  });
+
+  public deleteHrManagementRecord = asyncHandler(async (req: Request, res: Response) => {
+    const adminUserId = req.user?.userId;
+    if (!adminUserId) {
+      throw AppError.unauthorized("Authentication required", ApiErrorCode.ERR_UNAUTHORIZED);
+    }
+    const result = await authService.deleteHrManagementRecord(adminUserId, req.params.recordId);
+    res.status(200).json({ success: true, data: result });
   });
 
   public verifyInvite = asyncHandler(async (req: Request, res: Response) => {

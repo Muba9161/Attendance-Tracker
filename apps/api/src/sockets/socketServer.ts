@@ -3,10 +3,10 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 import { logger } from "../utils/logger";
-import { TokenPayload } from "../services/auth.service";
+import type { TokenPayload } from "../services/auth.service";
 import * as qrService from "../services/qr.service";
 import { UserRole, SocketEvent, SocketRoom, AttendanceStatus } from "@vorldx/shared";
-import { AttendanceRecord, Employee, QrDisplay } from "../models";
+import { AttendanceRecord, Employee, QrDisplay, User } from "../models";
 import * as dashboardService from "../services/dashboard.service";
 
 let ioInstance: SocketIOServer | null = null;
@@ -21,6 +21,92 @@ export interface ActiveHrSocketRecord {
 }
 
 const activeHrSockets = new Map<string, ActiveHrSocketRecord>();
+const SOCKET_AUTH_REVALIDATION_MS = 5000;
+
+function isHrRole(role: string): boolean {
+  return role === UserRole.HR || role === UserRole.ADMIN || role === "HR_ADMIN";
+}
+
+async function loadCurrentSocketUser(userId: string, tokenUser: TokenPayload): Promise<TokenPayload | null> {
+  const currentUser = await User.findById(userId).select("employeeId email role status");
+  if (!currentUser || currentUser.status !== "ACTIVE") return null;
+
+  if (currentUser.role === UserRole.EMPLOYEE) {
+    const employee = await Employee.findOne({ employeeId: currentUser.employeeId }).select("isActive");
+    if (!employee?.isActive) return null;
+  }
+
+  return {
+    ...tokenUser,
+    userId: currentUser._id.toString(),
+    employeeId: currentUser.employeeId,
+    email: currentUser.email,
+    role: currentUser.role,
+  };
+}
+
+async function revalidateUserSocket(socket: Socket): Promise<TokenPayload | null> {
+  const data = socket.data as AuthenticatedSocketData;
+  if (data.type !== "user" || !data.user) return null;
+
+  try {
+    const previousUser = data.user;
+    const currentUser = await loadCurrentSocketUser(previousUser.userId, previousUser);
+    if (!currentUser) {
+      socket.disconnect(true);
+      return null;
+    }
+
+    const wasHr = isHrRole(previousUser.role);
+    const isHr = isHrRole(currentUser.role);
+    data.user = currentUser;
+
+    if (wasHr && !isHr) {
+      void socket.leave(SocketRoom.hr());
+      void socket.leave(SocketRoom.hrDashboard());
+      if (activeHrSockets.delete(socket.id)) broadcastHrPresence();
+    } else if (!wasHr && isHr) {
+      void socket.join(SocketRoom.hr());
+      void socket.join(SocketRoom.hrDashboard());
+      activeHrSockets.set(socket.id, {
+        socketId: socket.id,
+        userId: currentUser.userId,
+        email: currentUser.email,
+        name: currentUser.email.split("@")[0] || "HR Staff",
+        role: currentUser.role,
+        employeeId: currentUser.employeeId,
+      });
+      socket.emit(SocketEvent.HR_PRESENCE, getActiveHrPresence());
+      broadcastHrPresence();
+    } else if (isHr) {
+      const hrRecord = activeHrSockets.get(socket.id);
+      if (hrRecord) {
+        hrRecord.email = currentUser.email;
+        hrRecord.role = currentUser.role;
+        hrRecord.employeeId = currentUser.employeeId;
+      }
+    }
+
+    return currentUser;
+  } catch (error) {
+    logger.error(`[Socket] Failed to revalidate user socket ${socket.id}:`, error);
+    socket.disconnect(true);
+    return null;
+  }
+}
+
+export async function reauthorizeUserSockets(userIds: string[]): Promise<void> {
+  if (!ioInstance || userIds.length === 0) return;
+  const targetIds = new Set(userIds);
+  await Promise.all(
+    Array.from(ioInstance.sockets.sockets.values())
+      .filter((socket) => {
+        const data = socket.data as AuthenticatedSocketData;
+        return data.type === "user" && !!data.user && targetIds.has(data.user.userId);
+      })
+      .map((socket) => revalidateUserSocket(socket))
+  );
+}
 
 export function getActiveHrPresence(): {
   count: number;
@@ -95,9 +181,12 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
       if (rawToken && typeof rawToken === "string" && rawToken.trim().length > 0) {
         try {
           const decoded = jwt.verify(rawToken.trim(), env.JWT_SECRET) as TokenPayload;
+          if (!decoded.userId) return next(new Error("ERR_UNAUTHORIZED: Invalid user token"));
+          const currentUser = await loadCurrentSocketUser(decoded.userId, decoded);
+          if (!currentUser) return next(new Error("ERR_UNAUTHORIZED: Account is inactive or unavailable"));
           socket.data = {
             type: "user",
-            user: decoded,
+            user: currentUser,
           } as AuthenticatedSocketData;
           return next();
         } catch {
@@ -167,11 +256,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
       }
 
       // Scoped Room: hr and hr:dashboard for HR and ADMIN users
-      if (
-        user.role === UserRole.HR ||
-        user.role === UserRole.ADMIN ||
-        user.role === ("HR_ADMIN" as unknown)
-      ) {
+      if (isHrRole(user.role)) {
         socket.join(SocketRoom.hr());
         socket.join(SocketRoom.hrDashboard());
 
@@ -196,12 +281,15 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
 
         // Inbound: get active HR presence on demand
         socket.on("hr:get_presence", (_req, callback) => {
-          const presence = getActiveHrPresence();
-          if (typeof callback === "function") {
-            callback(presence);
-          } else {
-            socket.emit(SocketEvent.HR_PRESENCE, presence);
-          }
+          void revalidateUserSocket(socket).then((currentUser) => {
+            if (!currentUser || !isHrRole(currentUser.role)) {
+              if (typeof callback === "function") callback({ success: false, message: "Unauthorized" });
+              return;
+            }
+            const presence = getActiveHrPresence();
+            if (typeof callback === "function") callback(presence);
+            else socket.emit(SocketEvent.HR_PRESENCE, presence);
+          });
         });
       } else {
         logger.info(
@@ -224,17 +312,18 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
 
       socket.on("enquiry.typing", (payload: { enquiryId: string; isTyping: boolean; userName?: string }) => {
         if (payload?.enquiryId) {
+          const currentUser = (socket.data as AuthenticatedSocketData).user || user;
           socket.to(`enquiry:${payload.enquiryId}`).emit("enquiry.typing", {
             ...payload,
-            userId: user.userId,
-            employeeId: user.employeeId,
-            role: user.role,
+            userId: currentUser.userId,
+            employeeId: currentUser.employeeId,
+            role: currentUser.role,
           });
           socket.broadcast.emit("enquiry.typing", {
             ...payload,
-            userId: user.userId,
-            employeeId: user.employeeId,
-            role: user.role,
+            userId: currentUser.userId,
+            employeeId: currentUser.employeeId,
+            role: currentUser.role,
           });
         }
       });
@@ -247,9 +336,11 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
           callback?: (response: Record<string, unknown>) => void
         ) => {
           try {
-            logger.debug(`[Socket] Received resync request from user ${user.employeeId}`);
+            const currentUser = await revalidateUserSocket(socket);
+            if (!currentUser) return;
+            logger.debug(`[Socket] Received resync request from user ${currentUser.employeeId}`);
 
-            if (user.role === UserRole.HR || user.role === UserRole.ADMIN) {
+            if (isHrRole(currentUser.role)) {
               const summary = await dashboardService.getDashboardSummary();
               const responseData = {
                 success: true,
@@ -262,7 +353,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
             } else {
               // Employee resync: fetch today's attendance
               const today = new Date().toISOString().slice(0, 10);
-              const employeeDoc = await Employee.findOne({ employeeId: user.employeeId });
+              const employeeDoc = await Employee.findOne({ employeeId: currentUser.employeeId });
               const record = employeeDoc
                 ? await AttendanceRecord.findOne({
                     employee: employeeDoc._id,
@@ -277,7 +368,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
                 data: record
                   ? {
                       recordId: record._id.toString(),
-                      employeeId: user.employeeId,
+                      employeeId: currentUser.employeeId,
                       dateKey: record.dateKey,
                       status: record.status,
                       punchType: record.checkOutTime ? "CHECK_OUT" : "CHECK_IN",
@@ -286,7 +377,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
                       durationMinutes: record.durationMinutes || 0,
                     }
                   : {
-                      employeeId: user.employeeId,
+                      employeeId: currentUser.employeeId,
                       status: AttendanceStatus.NOT_PUNCHED,
                       recordId: null,
                     },
@@ -302,6 +393,18 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer {
           }
         }
       );
+
+      const revalidationTimer = setInterval(() => {
+        void revalidateUserSocket(socket);
+      }, SOCKET_AUTH_REVALIDATION_MS);
+      revalidationTimer.unref?.();
+      socket.use((_packet, next) => {
+        void revalidateUserSocket(socket).then((currentUser) => {
+          if (!currentUser) next(new Error("ERR_UNAUTHORIZED: Account is inactive or unavailable"));
+          else next();
+        });
+      });
+      socket.once("disconnect", () => clearInterval(revalidationTimer));
     } else if (data.type === "display" && data.display) {
       const { display } = data;
 

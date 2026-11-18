@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderWidth: 1,
-    borderColor: 'rgba(184, 190, 255, 0.08)',
+    borderColor: 'rgba(184, 204, 214, 0.08)',
   },
   criteriaRow: {
     flexDirection: 'row',

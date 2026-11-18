@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 import request from "supertest";
 import { app } from "../src/app";
 import { env } from "../src/config/env";
-import { initSocketServer, closeSocketServer } from "../src/sockets/socketServer";
+import { initSocketServer, closeSocketServer, getSocketServer } from "../src/sockets/socketServer";
 import {
   Employee,
   IEmployee,
@@ -19,7 +19,16 @@ import {
   WfhRequest,
   AuditEvent,
 } from "../src/models";
-import { AttendanceStatus, SocketEvent, TerminalStatus, UserRole, WorkType } from "@vorldx/shared";
+import {
+  addDaysToDateKey,
+  getDateKey,
+  AttendanceStatus,
+  SocketEvent,
+  SocketRoom,
+  TerminalStatus,
+  UserRole,
+  WorkType,
+} from "@vorldx/shared";
 import * as qrService from "../src/services/qr.service";
 
 describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
@@ -36,6 +45,14 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
   let pairedDisplay: { displayId: string; credential: string; terminalId: string };
 
   const activeSockets: ClientSocket[] = [];
+
+  function nextFutureWorkdayDateKey(): string {
+    let dateKey = addDaysToDateKey(getDateKey(new Date(), "Asia/Kolkata"), 1);
+    while ([0, 6].includes(new Date(`${dateKey}T00:00:00.000Z`).getUTCDay())) {
+      dateKey = addDaysToDateKey(dateKey, 1);
+    }
+    return dateKey;
+  }
 
   function connectClient(auth: Record<string, unknown>): Promise<ClientSocket> {
     return new Promise((resolve, reject) => {
@@ -154,7 +171,7 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
     await AuditEvent.deleteMany({});
 
     // 1. Setup Policy
-    await AttendancePolicy.create({
+    const socketTestPolicy = await AttendancePolicy.create({
       name: "Socket Test Policy",
       version: 1,
       timezone: "Asia/Kolkata",
@@ -215,6 +232,7 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
       designation: "Software Engineer",
       workType: WorkType.FULL_TIME,
       joiningDate: "2025-01-15",
+      shiftId: socketTestPolicy.shifts[0]._id,
       status: "ACTIVE",
       isActive: true,
     });
@@ -249,6 +267,7 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
       designation: "Product Marketer",
       workType: WorkType.FULL_TIME,
       joiningDate: "2025-02-01",
+      shiftId: socketTestPolicy.shifts[0]._id,
       status: "ACTIVE",
       isActive: true,
     });
@@ -314,6 +333,75 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
       });
       expect(displaySocket.connected).toBe(true);
     });
+
+    it("disconnects an inactive employee and removes a demoted HR socket from HR rooms", async () => {
+      const employeeSocket = await connectClient({ token: empAToken });
+      await User.updateOne({ employeeId: empADoc.employeeId }, { $set: { status: "INACTIVE" } });
+      await Employee.updateOne({ _id: empADoc._id }, { $set: { isActive: false } });
+      employeeSocket.emit(SocketEvent.RESYNC, {});
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+      expect(employeeSocket.connected).toBe(false);
+      expect((await expectConnectionError({ token: empAToken })).message).toContain("inactive or unavailable");
+
+      const hrSocket = await connectClient({ token: hrToken });
+      const hrUser = await User.findOne({ employeeId: "HR-999" });
+      expect(hrUser).toBeTruthy();
+      await Employee.create({
+        employeeId: "HR-999",
+        name: "Demoted HR Test User",
+        email: "hr@vorldx.demo",
+        department: "Operations",
+        designation: "Employee",
+        workType: WorkType.FULL_TIME,
+        joiningDate: "2025-01-01",
+        isActive: true,
+        userId: hrUser!._id,
+      });
+      await User.updateOne({ _id: hrUser!._id }, { $set: { role: UserRole.EMPLOYEE } });
+
+      const presenceAck = new Promise<Record<string, unknown>>((resolve) => {
+        hrSocket.emit("hr:get_presence", {}, (response: Record<string, unknown>) => resolve(response));
+      });
+      expect((await presenceAck).success).toBe(false);
+
+      const noHrEvent = assertEventNotReceived(hrSocket, SocketEvent.ATTENDANCE_UPDATED, 1000);
+      getSocketServer()?.to(SocketRoom.hr()).emit(SocketEvent.ATTENDANCE_UPDATED, { employeeId: "EMP-001" });
+      await noHrEvent;
+
+      const admin = await User.create({
+        employeeId: "ADM-999",
+        email: "admin-demotion@vorldx.demo",
+        passwordHash: "dummyHash",
+        role: UserRole.ADMIN,
+        status: "ACTIVE",
+      });
+      await Employee.create({
+        employeeId: admin.employeeId,
+        name: "Demoted Admin Test User",
+        email: admin.email,
+        department: "Operations",
+        designation: "Employee",
+        workType: WorkType.FULL_TIME,
+        joiningDate: "2025-01-01",
+        isActive: true,
+        userId: admin._id,
+      });
+      const adminToken = jwt.sign({
+        userId: admin._id.toString(),
+        employeeId: admin.employeeId,
+        email: admin.email,
+        role: admin.role,
+      }, env.JWT_SECRET, { expiresIn: "1h" });
+      const adminSocket = await connectClient({ token: adminToken });
+      await User.updateOne({ _id: admin._id }, { $set: { role: UserRole.EMPLOYEE } });
+      const adminPresenceAck = new Promise<Record<string, unknown>>((resolve) => {
+        adminSocket.emit("hr:get_presence", {}, (response: Record<string, unknown>) => resolve(response));
+      });
+      expect((await adminPresenceAck).success).toBe(false);
+      const noAdminHrEvent = assertEventNotReceived(adminSocket, SocketEvent.ATTENDANCE_UPDATED, 1000);
+      getSocketServer()?.to(SocketRoom.hrDashboard()).emit(SocketEvent.ATTENDANCE_UPDATED, { employeeId: "EMP-001" });
+      await noAdminHrEvent;
+    }, 20000);
   });
 
   describe("Scoped Room Isolation on Attendance Punch", () => {
@@ -338,11 +426,14 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
         pairedDisplay.credential
       );
 
+      const simulatedDateKey = getDateKey(new Date(), "Asia/Kolkata");
+      const simulatedNow = new Date(`${simulatedDateKey}T03:35:00.000Z`);
+
       // 4. Employee A checks in via POST /attendance/scan
       const scanRes = await request(app)
         .post("/attendance/scan")
         .set("Authorization", `Bearer ${empAToken}`)
-        .send({ token: challenge.token });
+        .send({ token: challenge.token, simulatedNow: simulatedNow.toISOString() });
 
       expect(scanRes.status).toBe(200);
       expect(scanRes.body.success).toBe(true);
@@ -366,6 +457,52 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
         punchType: "CHECK_IN",
       });
       expect([AttendanceStatus.PRESENT, AttendanceStatus.LATE]).toContain(empAEvent.status);
+
+      const record = await AttendanceRecord.findById(scanRes.body.record._id);
+      expect(record).toBeTruthy();
+      const recordId = record!._id.toString();
+      const dateKey = record!.dateKey;
+      const finalStatus = record!.status;
+      expect(hrEvent).toMatchObject({ recordId, dateKey, status: finalStatus });
+      expect(empAEvent).toMatchObject({ recordId, dateKey, status: finalStatus });
+
+      const admin = await User.create({
+        employeeId: "ADM-SOCKET-001",
+        email: "admin-socket@vorldx.demo",
+        passwordHash: "dummyHash",
+        role: UserRole.ADMIN,
+        status: "ACTIVE",
+      });
+      const adminToken = jwt.sign({
+        userId: admin._id.toString(),
+        employeeId: admin.employeeId,
+        email: admin.email,
+        role: admin.role,
+      }, env.JWT_SECRET, { expiresIn: "1h" });
+
+      const [history, hrLedger, adminLedger, dashboard, report] = await Promise.all([
+        request(app).get(`/attendance/me?dateKey=${dateKey}`).set("Authorization", `Bearer ${empAToken}`),
+        request(app).get(`/attendance?dateKey=${dateKey}&employeeId=${empADoc.employeeId}`).set("Authorization", `Bearer ${hrToken}`),
+        request(app).get(`/attendance?dateKey=${dateKey}&employeeId=${empADoc.employeeId}`).set("Authorization", `Bearer ${adminToken}`),
+        request(app).get(`/dashboard/summary?dateKey=${dateKey}`).set("Authorization", `Bearer ${hrToken}`),
+        request(app).get(`/reports/attendance?startDate=${dateKey}&endDate=${dateKey}&employeeId=${empADoc.employeeId}`).set("Authorization", `Bearer ${hrToken}`),
+      ]);
+
+      for (const response of [history, hrLedger, adminLedger, dashboard, report]) {
+        expect(response.status).toBe(200);
+      }
+      expect(history.body.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({ _id: recordId, dateKey, status: finalStatus }),
+      ]));
+      for (const ledger of [hrLedger, adminLedger]) {
+        expect(ledger.body.data).toEqual(expect.arrayContaining([
+          expect.objectContaining({ _id: recordId, dateKey, status: finalStatus }),
+        ]));
+      }
+      expect(report.body.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({ _id: recordId, dateKey, status: finalStatus }),
+      ]));
+      expect(dashboard.body.summary.presentToday).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -374,6 +511,9 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
       const hrSocket = await connectClient({ token: hrToken });
       const empASocket = await connectClient({ token: empAToken });
       const empBSocket = await connectClient({ token: empBToken });
+      let hrCreatedEventCount = 0;
+      const countHrCreated = () => { hrCreatedEventCount += 1; };
+      hrSocket.on(SocketEvent.WFH_CREATED, countHrCreated);
 
       const hrReceivedPromise = waitForEvent(hrSocket, SocketEvent.WFH_CREATED);
       const empAReceivedPromise = waitForEvent(empASocket, SocketEvent.WFH_CREATED);
@@ -383,8 +523,8 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
         1200
       );
 
-      // Target future Monday (ensures workday and advance notice)
-      const futureDateKey = "2026-11-02";
+      // Target the next workday with enough notice, regardless of when the suite runs.
+      const futureDateKey = nextFutureWorkdayDateKey();
 
       const res = await request(app)
         .post("/api/wfh/requests")
@@ -412,6 +552,9 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
         dateKey: futureDateKey,
         status: "PENDING",
       });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(hrCreatedEventCount).toBe(1);
+      hrSocket.off(SocketEvent.WFH_CREATED, countHrCreated);
     });
 
     it("delivers wfh.decided and auto-credit attendance.updated to HR and employee upon approval; third party receives nothing", async () => {
@@ -419,7 +562,7 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
       const empASocket = await connectClient({ token: empAToken });
       const empBSocket = await connectClient({ token: empBToken });
 
-      const futureDateKey = "2026-11-03";
+      const futureDateKey = nextFutureWorkdayDateKey();
       const createRes = await request(app)
         .post("/api/wfh/requests")
         .set("Authorization", `Bearer ${empAToken}`)
@@ -470,6 +613,108 @@ describe("Real-Time Socket.IO Protocol & Event Architecture", () => {
   });
 
   describe("Display Terminal Scoped Events", () => {
+    it("sends only masked employee confirmation data to the display after a saved punch", async () => {
+      const displaySocket = await connectClient({
+        terminalId: pairedDisplay.terminalId,
+        credential: pairedDisplay.credential,
+      });
+      const hrSocket = await connectClient({ token: hrToken });
+      const initialQrEvent = waitForEvent(displaySocket, SocketEvent.QR_ROTATED);
+      const challenge = await qrService.requestRotatingChallenge(
+        pairedDisplay.terminalId,
+        pairedDisplay.credential
+      );
+      await initialQrEvent;
+
+      const confirmationPromise = waitForEvent<Record<string, unknown>>(
+        displaySocket,
+        SocketEvent.ATTENDANCE_DISPLAY_CONFIRMATION
+      );
+      const hrShouldNotReceive = assertEventNotReceived(
+        hrSocket,
+        SocketEvent.ATTENDANCE_DISPLAY_CONFIRMATION,
+        1000
+      );
+      const dateKey = getDateKey(new Date(), "Asia/Kolkata");
+      const scan = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${empAToken}`)
+        .send({
+          token: challenge.token,
+          simulatedNow: new Date(`${dateKey}T03:35:00.000Z`).toISOString(),
+        });
+      expect(scan.status).toBe(200);
+
+      const [confirmation] = await Promise.all([confirmationPromise, hrShouldNotReceive]);
+      expect(confirmation).toMatchObject({
+        recordId: scan.body.record._id,
+        terminalId: pairedDisplay.terminalId,
+        employeeName: empADoc.name,
+        maskedEmployeeId: "••••01",
+        punchType: "CHECK_IN",
+      });
+      expect(confirmation.timestamp).toBe(scan.body.record.checkInTime);
+      expect(confirmation.timeZone).toBe("Asia/Kolkata");
+      expect(confirmation).not.toHaveProperty("employeeId");
+    });
+
+    it("does not emit a display confirmation for a rejected attendance scan", async () => {
+      const displaySocket = await connectClient({
+        terminalId: pairedDisplay.terminalId,
+        credential: pairedDisplay.credential,
+      });
+      const initialQrEvent = waitForEvent(displaySocket, SocketEvent.QR_ROTATED);
+      await qrService.requestRotatingChallenge(pairedDisplay.terminalId, pairedDisplay.credential);
+      await initialQrEvent;
+
+      const noConfirmation = assertEventNotReceived(
+        displaySocket,
+        SocketEvent.ATTENDANCE_DISPLAY_CONFIRMATION,
+        1000
+      );
+      const rejected = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${empAToken}`)
+        .send({ token: "qrt_invalid_confirmation_test" });
+      expect(rejected.status).toBe(400);
+      await noConfirmation;
+    });
+
+    it("sends the successor QR to the display immediately after attendance is persisted", async () => {
+      const displaySocket = await connectClient({
+        terminalId: pairedDisplay.terminalId,
+        credential: pairedDisplay.credential,
+      });
+      const initialEvent = waitForEvent<Record<string, unknown>>(
+        displaySocket,
+        SocketEvent.QR_ROTATED
+      );
+      const challenge = await qrService.requestRotatingChallenge(
+        pairedDisplay.terminalId,
+        pairedDisplay.credential
+      );
+      await initialEvent;
+      const successorEvent = waitForEvent<Record<string, unknown>>(
+        displaySocket,
+        SocketEvent.QR_ROTATED
+      );
+      const dateKey = getDateKey(new Date(), "Asia/Kolkata");
+      const scan = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${empAToken}`)
+        .send({
+          token: challenge.token,
+          simulatedNow: new Date(`${dateKey}T03:35:00.000Z`).toISOString(),
+        });
+
+      expect(scan.status).toBe(200);
+      const successor = await successorEvent;
+      expect(successor.terminalId).toBe(pairedDisplay.terminalId);
+      expect(successor.qrPayload).toBeTruthy();
+      expect(successor.token).not.toBe(challenge.token);
+      expect(await QrToken.findOne({ token: challenge.token }).then((doc) => doc?.consumedAt)).toBeInstanceOf(Date);
+    });
+
     it("delivers qr.rotated to the specific display screen, while employees receive nothing", async () => {
       const displaySocket = await connectClient({
         terminalId: pairedDisplay.terminalId,

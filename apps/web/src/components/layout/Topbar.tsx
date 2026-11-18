@@ -3,8 +3,6 @@ import { useLocation, Link } from "react-router-dom";
 import {
   Menu,
   ChevronRight,
-  Wifi,
-  WifiOff,
   LogOut,
   User,
   Sun,
@@ -20,7 +18,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { useSocket } from "../../context/SocketContext";
+import { useLogoutConfirmation } from "../../hooks/useLogoutConfirmation";
 import { useTheme } from "../../context/ThemeContext";
 import { Badge } from "../ui/Badge";
 import { HROnlineIndicator } from "../ui/HROnlineIndicator";
@@ -38,12 +36,13 @@ interface TopbarProps {
 }
 
 const routeNameMap: Record<string, string> = {
-  "": "Executive Dashboard",
-  dashboard: "Executive Dashboard",
+  "": "Dashboard",
+  dashboard: "Dashboard",
   attendance: "Attendance Ledger",
   reports: "Reports & Analytics",
   wfh: "WFH Approvals",
-  employees: "Employee Directory",
+  employees: "Employee Management",
+  "hr-management": "HR Management",
   policies: "Policy & Shifts",
   calendar: "Working Calendar",
   leave: "Leave Requests",
@@ -63,8 +62,8 @@ export const Topbar: React.FC<TopbarProps> = ({
   onToggleSidebar,
 }) => {
   const location = useLocation();
-  const { user, logout } = useAuth();
-  const { isConnected, isReconnecting } = useSocket();
+  const { user } = useAuth();
+  const { requestLogout, dialog: logoutDialog } = useLogoutConfirmation();
   const { resolvedTheme, toggleTheme } = useTheme();
 
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -123,6 +122,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   }).format(new Date());
 
   return (
+    <>
     <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 md:px-8 flex items-center justify-between gap-2 sm:gap-4 sticky top-0 z-30 shadow-xs transition-colors select-none">
       {/* Left: Mobile hamburger, Desktop sidebar toggle, & Breadcrumbs / Page Title */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -209,49 +209,6 @@ export const Topbar: React.FC<TopbarProps> = ({
 
       {/* Right Controls: Real Socket Status, HR Presence, Notifications, Theme, Profile */}
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-        {/* Real-Time WebSocket Status Indicator */}
-        <Tooltip
-          position="bottom"
-          align="end"
-          content={
-            isConnected
-              ? "Live Socket Gateway connected: Streaming real-time attendance scans and approvals"
-              : isReconnecting
-                ? "Attempting reconnection to attendance socket cluster..."
-                : "Real-time socket disconnected: Polling fallback active"
-          }
-        >
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors select-none ${
-              isConnected
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/50"
-                : isReconnecting
-                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/50"
-                  : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
-            }`}
-          >
-            {isConnected ? (
-              <>
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                </span>
-                <span className="hidden sm:inline">Live Sync</span>
-              </>
-            ) : isReconnecting ? (
-              <>
-                <Wifi className="w-3.5 h-3.5 animate-spin text-amber-500" />
-                <span className="hidden sm:inline">Reconnecting</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden sm:inline">Offline</span>
-              </>
-            )}
-          </div>
-        </Tooltip>
-
         {/* HR Staff Online Presence Indicator */}
         <div className="hidden lg:block">
           <HROnlineIndicator variant="pill" />
@@ -414,7 +371,7 @@ export const Topbar: React.FC<TopbarProps> = ({
             aria-label={`${user?.name || user?.employeeId || "User"} - Open user profile menu`}
             aria-expanded={isProfileOpen}
           >
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-500 text-white flex items-center justify-center font-bold text-xs shadow-xs">
               {user?.name ? user.name.charAt(0).toUpperCase() : <User className="w-3.5 h-3.5" />}
             </div>
             <div className="hidden sm:block text-left">
@@ -465,7 +422,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                   type="button"
                   onClick={() => {
                     setIsProfileOpen(false);
-                    logout();
+                    requestLogout();
                   }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
                 >
@@ -478,5 +435,7 @@ export const Topbar: React.FC<TopbarProps> = ({
         </div>
       </div>
     </header>
+    {logoutDialog}
+    </>
   );
 };

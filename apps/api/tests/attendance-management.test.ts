@@ -239,6 +239,22 @@ describe("HR Attendance Management, Corrections & Automated Absence Job", () => 
       expect(res.body.data[0].employeeId).toBe("EMP-1002");
     });
 
+    it("composes employee, search, department, status and date filters instead of replacing conditions", async () => {
+      const matching = await request(app)
+        .get(`/attendance?employee=${employeeDoc._id}&search=Rohan&department=Engineering&status=CHECKED_OUT&startDate=2026-10-15&endDate=2026-10-15`)
+        .set("Authorization", `Bearer ${hrToken}`);
+      expect(matching.status).toBe(200);
+      expect(matching.body.pagination.total).toBe(1);
+      expect(matching.body.data[0].employeeId).toBe(employeeDoc.employeeId);
+
+      const conflictingIdentityAndSearch = await request(app)
+        .get(`/attendance?employee=${secondEmployeeDoc._id}&search=Rohan&startDate=2026-10-15&endDate=2026-10-16`)
+        .set("Authorization", `Bearer ${hrToken}`);
+      expect(conflictingIdentityAndSearch.status).toBe(200);
+      expect(conflictingIdentityAndSearch.body.pagination.total).toBe(0);
+      expect(conflictingIdentityAndSearch.body.data).toEqual([]);
+    });
+
     it("blocks regular employee from accessing GET /attendance with 403 ERR_FORBIDDEN", async () => {
       const res = await request(app)
         .get("/attendance")
@@ -267,94 +283,61 @@ describe("HR Attendance Management, Corrections & Automated Absence Job", () => 
       });
     });
 
-    it("allows HR to correct checkIn and checkOut, preserves original values, recomputes duration & logs audit", async () => {
-      // Correct to On-Time Check-In (09:05 AM IST = 03:35 AM UTC) and Check-Out (06:05 PM IST = 12:35 PM UTC)
-      // Duration: 9 hours (540 mins) -> status CHECKED_OUT, isLate: false
-      const correctedCheckIn = "2026-10-15T03:35:00.000Z";
-      const correctedCheckOut = "2026-10-15T12:35:00.000Z";
+    it("allows Admin correction and records before/after values without losing the QR early-checkout reason", async () => {
+      targetRecord.checkOutTime = new Date("2026-10-15T11:00:00.000Z");
+      targetRecord.isEarlyCheckout = true;
+      targetRecord.earlyCheckoutReason = "Medical appointment";
+      await targetRecord.save();
 
-      const res = await request(app)
-        .patch(`/attendance/${targetRecord._id}/correct`)
-        .set("Authorization", `Bearer ${hrToken}`)
-        .send({
-          checkInTime: correctedCheckIn,
-          checkOutTime: correctedCheckOut,
-          isLate: false,
-          reason: "Employee biometric/QR device malfunctioned at main gate during morning rush",
-        });
+      const res = await request(app).patch(`/attendance/${targetRecord._id}/correct`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ checkOutTime: "2026-10-15T12:35:00.000Z", status: AttendanceStatus.CHECKED_OUT, reason: "Verified access log" });
 
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.record.durationMinutes).toBe(540);
-      expect(res.body.record.status).toBe(AttendanceStatus.CHECKED_OUT);
-      expect(res.body.record.isLate).toBe(false);
-      expect(res.body.record.isManuallyCorrected).toBe(true);
-
-      // Verify originalValues preserved
-      expect(res.body.record.originalValues).toBeDefined();
-      expect(res.body.record.originalValues.status).toBe(AttendanceStatus.LATE);
-      expect(res.body.record.originalValues.isLate).toBe(true);
-
-      // Verify corrections history array populated
-      expect(res.body.record.corrections).toBeDefined();
-      expect(res.body.record.corrections.length).toBe(1);
-      expect(res.body.record.corrections[0].correctionReason).toMatch(/malfunctioned/i);
-      expect(res.body.record.corrections[0].previousValues.isLate).toBe(true);
-      expect(res.body.record.corrections[0].newValues.durationMinutes).toBe(540);
-
-      // Verify AuditEvent recorded
-      const audit = await AuditEvent.findOne({
-        entityId: targetRecord._id.toString(),
-        action: "CORRECTION",
-      });
-      expect(audit).not.toBeNull();
-      expect(audit?.performedBy?.toString()).toBe(hrUser._id.toString());
-      expect(audit?.metadata?.actorRole).toBe("HR");
-      expect(audit?.reason).toMatch(/malfunctioned/i);
+      const updated = await AttendanceRecord.findById(targetRecord._id);
+      expect(updated?.checkOutTime?.toISOString()).toBe("2026-10-15T12:35:00.000Z");
+      expect(updated?.earlyCheckoutReason).toBe("Medical appointment");
+      expect(updated?.originalValues?.checkInTime?.toISOString()).toBe("2026-10-15T04:30:00.000Z");
+      expect(updated?.corrections).toHaveLength(1);
+      expect(updated?.corrections?.[0].previousValues.checkOutTime?.toISOString()).toBe("2026-10-15T11:00:00.000Z");
+      expect(updated?.corrections?.[0].newValues.checkOutTime?.toISOString()).toBe("2026-10-15T12:35:00.000Z");
+      const audit = await AuditEvent.findOne({ entityId: targetRecord._id.toString(), action: "CORRECTION" });
+      expect(audit?.performedBy?.toString()).toBe(adminUser._id.toString());
+      expect(audit?.reason).toBe("Verified access log");
+      expect(audit?.previousValue).toMatchObject({ checkInTime: new Date("2026-10-15T04:30:00.000Z"), checkOutTime: new Date("2026-10-15T11:00:00.000Z"), status: AttendanceStatus.LATE });
+      expect(audit?.newValue).toMatchObject({ checkOutTime: new Date("2026-10-15T12:35:00.000Z"), status: AttendanceStatus.CHECKED_OUT });
     });
 
-    it("rejects correction when checkOutTime is before or equal to checkInTime", async () => {
-      const res = await request(app)
-        .patch(`/attendance/${targetRecord._id}/correct`)
-        .set("Authorization", `Bearer ${hrToken}`)
-        .send({
-          checkInTime: "2026-10-15T12:00:00.000Z",
-          checkOutTime: "2026-10-15T09:00:00.000Z", // Invalid! Before checkIn
-          reason: "Accidental inverted timestamp entry",
-        });
-
+    it("requires an Admin correction reason", async () => {
+      const res = await request(app).patch(`/attendance/${targetRecord._id}/correct`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ checkOutTime: "2026-10-15T12:35:00.000Z", status: AttendanceStatus.CHECKED_OUT });
       expect(res.status).toBe(400);
+      expect(await AuditEvent.countDocuments({ entityId: targetRecord._id.toString(), action: "CORRECTION" })).toBe(0);
     });
 
-    it("rejects correction with missing or too short justification reason", async () => {
-      const res = await request(app)
-        .patch(`/attendance/${targetRecord._id}/correct`)
-        .set("Authorization", `Bearer ${hrToken}`)
-        .send({
-          checkInTime: "2026-10-15T03:30:00.000Z",
-          checkOutTime: "2026-10-15T12:00:00.000Z",
-          reason: "fix", // too short (< 5 chars)
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body.code).toBe(ApiErrorCode.ERR_INVALID_INPUT);
+    it("returns 403 to HR and employees attempting the correction API", async () => {
+      for (const token of [hrToken, employeeToken]) {
+        const res = await request(app).patch(`/attendance/${targetRecord._id}/correct`)
+          .set("Authorization", `Bearer ${token}`)
+          .send({ checkOutTime: "2026-10-15T12:35:00.000Z", status: AttendanceStatus.CHECKED_OUT, reason: "attempt manual change" });
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe(ApiErrorCode.ERR_FORBIDDEN);
+      }
+      expect(await AuditEvent.countDocuments({ entityId: targetRecord._id.toString(), action: "CORRECTION" })).toBe(0);
     });
 
-    it("strictly blocks regular employees from modifying attendance records (403 ERR_FORBIDDEN)", async () => {
-      const res = await request(app)
-        .patch(`/attendance/${targetRecord._id}/correct`)
-        .set("Authorization", `Bearer ${employeeToken}`)
-        .send({
-          checkInTime: "2026-10-15T03:30:00.000Z",
-          checkOutTime: "2026-10-15T12:00:00.000Z",
-          reason: "Self-correcting my own arrival punch",
-        });
-
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe(ApiErrorCode.ERR_FORBIDDEN);
+    it("rejects the legacy direct PATCH route for every authenticated role", async () => {
+      for (const token of [hrToken, adminToken, employeeToken]) {
+        const res = await request(app).patch(`/attendance/${targetRecord._id}`)
+          .set("Authorization", `Bearer ${token}`).send({ status: AttendanceStatus.PRESENT, reason: "attempt manual change" });
+        expect(res.status).toBe(404);
+      }
+      const recordAfter = await AttendanceRecord.findById(targetRecord._id);
+      expect(recordAfter?.checkInTime?.toISOString()).toBe("2026-10-15T04:30:00.000Z");
+      expect(recordAfter?.checkOutTime).toBeNull();
     });
   });
-
   describe("Scheduled Absence & Incomplete Checkout Evaluation Job", () => {
     it("refuses to mark absentees for today before the policy cutoff time", async () => {
       // Cutoff in policy is 20:00 (8:00 PM IST)

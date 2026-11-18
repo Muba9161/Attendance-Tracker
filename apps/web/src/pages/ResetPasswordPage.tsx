@@ -85,14 +85,14 @@ export const ResetPasswordPage: React.FC = () => {
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center items-center p-4 selection:bg-cyan-500 selection:text-slate-900">
       {/* Background Decorative Glow */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[720px] h-[520px] bg-gradient-to-tr from-blue-600/25 via-indigo-600/20 to-cyan-500/25 rounded-full blur-3xl opacity-75" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[720px] h-[520px] bg-gradient-to-tr from-blue-600/25 via-cyan-500/20 to-cyan-500/25 rounded-full blur-3xl opacity-75" />
       </div>
 
       <div className="relative w-full max-w-md space-y-5">
         {/* Brand Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex w-14 h-14 rounded-2xl bg-white p-2 items-center justify-center shadow-xl shadow-blue-500/25 mb-1 ring-4 ring-white/10">
-            <img src="/vorldx-logo.png" alt="VorldX" className="w-10 h-10 object-contain" />
+            <img src="/vorldx-hero-logo.webp" alt="VorldX" className="w-10 h-10 object-contain" />
           </div>
           <h1 className="text-2xl font-black tracking-tight text-white flex items-center justify-center gap-1.5">
             <span>Vorld</span>

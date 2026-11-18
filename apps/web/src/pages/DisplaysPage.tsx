@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   useDisplays,
   useRegisterDisplay,
   useUpdateDisplayStatus,
   useAuthorizeDisplay,
   useRevokeDisplay,
+  useArchiveDisplay,
   DisplayTerminalItem,
 } from "../api/queries";
 import { Card } from "../components/ui/Card";
@@ -14,6 +15,7 @@ import { Badge } from "../components/ui/Badge";
 import { Modal } from "../components/ui/Modal";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import { useSocket } from "../context/SocketContext";
 import {
@@ -30,25 +32,33 @@ import {
   Clock,
   MapPin,
   CheckCircle2,
+  MoreHorizontal,
+  Archive,
 } from "lucide-react";
 
 export const DisplaysPage: React.FC = () => {
   const { toast } = useToast();
   const { socket } = useSocket();
 
-  const { data: response, isLoading, refetch } = useDisplays();
+  const { data: response, isLoading, isFetching, isError, error, refetch } = useDisplays();
   const displays = response?.data || [];
 
   const registerMutation = useRegisterDisplay();
   const updateStatusMutation = useUpdateDisplayStatus();
   const authorizeMutation = useAuthorizeDisplay();
   const revokeMutation = useRevokeDisplay();
+  const archiveMutation = useArchiveDisplay();
 
   // Register Modal State
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [registerForm, setRegisterForm] = useState({ name: "", location: "" });
   const [createdDisplay, setCreatedDisplay] = useState<DisplayTerminalItem | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  const closeRegisterModal = useCallback(() => {
+    setShowRegisterModal(false);
+    setCreatedDisplay(null);
+  }, []);
 
   // Status/Revocation Confirmation Modals
   const [selectedDisplay, setSelectedDisplay] = useState<DisplayTerminalItem | null>(null);
@@ -57,6 +67,27 @@ export const DisplaysPage: React.FC = () => {
 
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [statusReason, setStatusReason] = useState("");
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+
+  const handleConfirmArchive = async () => {
+    if (!selectedDisplay) return;
+    try {
+      await archiveMutation.mutateAsync({
+        id: selectedDisplay.terminalId || selectedDisplay.id,
+        reason: "Display terminal archived by administrator",
+      });
+      toast({
+        title: "Display Archived",
+        description: `${selectedDisplay.name} was removed from the active management list. History was preserved.`,
+        type: "success",
+      });
+      setShowArchiveModal(false);
+      setSelectedDisplay(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to archive display";
+      toast({ title: "Archive Failed", description: message, type: "error" });
+    }
+  };
 
   // Live Socket.IO Updates
   useEffect(() => {
@@ -88,7 +119,10 @@ export const DisplaysPage: React.FC = () => {
     }
 
     try {
-      const res = await registerMutation.mutateAsync(registerForm);
+      const res = await registerMutation.mutateAsync({
+        name: registerForm.name.trim(),
+        location: registerForm.location.trim(),
+      });
       setCreatedDisplay(res.data);
       setRegisterForm({ name: "", location: "" });
       toast({
@@ -230,6 +264,10 @@ export const DisplaysPage: React.FC = () => {
           <Skeleton className="h-56 w-full" />
           <Skeleton className="h-56 w-full" />
         </div>
+      ) : isError && !response ? (
+        <ErrorState title="Unable to load display terminals"
+          message={error instanceof Error ? error.message : "The display request failed."}
+          onRetry={() => void refetch()} isRetrying={isFetching} />
       ) : displays.length === 0 ? (
         <Card className="p-8">
           <EmptyState
@@ -251,6 +289,10 @@ export const DisplaysPage: React.FC = () => {
           />
         </Card>
       ) : (
+        <>
+        {isError && <ErrorState title="Display refresh failed"
+          message={error instanceof Error ? error.message : "Showing the last successfully loaded displays."}
+          onRetry={() => void refetch()} isRetrying={isFetching} className="mb-4 p-3" />}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {displays.map((display) => {
             const online = isOnline(display.lastSeen);
@@ -339,8 +381,12 @@ export const DisplaysPage: React.FC = () => {
                 </div>
 
                 {/* Card Action Buttons */}
-                <div className="flex items-center justify-between gap-2 pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
+                  <details className="relative">
+                    <summary aria-label={`Actions for ${display.name}`} className="list-none cursor-pointer inline-flex items-center justify-center rounded-md border border-slate-300 dark:border-slate-700 px-3 h-9 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
+                      <MoreHorizontal className="w-4 h-4 mr-1" /> Actions
+                    </summary>
+                    <div className="absolute right-0 bottom-full mb-2 z-20 min-w-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 shadow-xl flex flex-col gap-1">
                     {!isRevoked && (
                       <Button
                         type="button"
@@ -352,7 +398,7 @@ export const DisplaysPage: React.FC = () => {
                           setStatusReason("");
                           setShowStatusModal(true);
                         }}
-                        className="text-xs h-7 px-2 gap-1"
+                        className="w-full justify-start text-xs h-8 px-2 gap-2"
                         title={display.isActive ? "Disable Screen" : "Enable Screen"}
                       >
                         <Power className="w-3.5 h-3.5" />
@@ -366,46 +412,53 @@ export const DisplaysPage: React.FC = () => {
                       size="sm"
                       variant="outline"
                       onClick={() => handleAuthorizeNewCode(display)}
-                      className="text-xs h-7 px-2 gap-1 text-blue-600 hover:text-blue-700"
+                      className="w-full justify-start text-xs h-8 px-2 gap-2 text-blue-600 hover:text-blue-700"
                       title="Generate new pairing code"
                     >
                       <Key className="w-3.5 h-3.5" />
                       Pair Code
                     </Button>
-                  </div>
-
-                  {!isRevoked && (
+                    {!isRevoked && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedDisplay(display);
+                          setRevokeReason("");
+                          setShowRevokeModal(true);
+                        }}
+                        className="w-full justify-start text-xs h-8 px-2 gap-2 text-red-600 hover:text-red-700"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" /> Revoke
+                      </Button>
+                    )}
                     <Button
                       type="button"
-                      id={`revoke-display-btn-${display.terminalId}`}
                       size="sm"
                       variant="outline"
                       onClick={() => {
                         setSelectedDisplay(display);
-                        setRevokeReason("");
-                        setShowRevokeModal(true);
+                        setShowArchiveModal(true);
                       }}
-                      className="text-xs h-7 px-2 gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                      title="Permanently revoke terminal credential"
+                      className="w-full justify-start text-xs h-8 px-2 gap-2 text-red-700 hover:text-red-800"
                     >
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      Revoke
+                      <Archive className="w-3.5 h-3.5" /> Remove / Archive
                     </Button>
-                  )}
+                    </div>
+                  </details>
                 </div>
               </Card>
             );
           })}
         </div>
+        </>
       )}
 
       {/* REGISTER DISPLAY / ONE-TIME PAIRING CODE MODAL */}
       <Modal
         isOpen={showRegisterModal}
-        onClose={() => {
-          setShowRegisterModal(false);
-          setCreatedDisplay(null);
-        }}
+        onClose={closeRegisterModal}
         title={
           createdDisplay ? "Display Terminal Pairing Code" : "Register Office QR Display Terminal"
         }
@@ -448,7 +501,7 @@ export const DisplaysPage: React.FC = () => {
               <div>
                 <span className="font-bold">Important: </span>
                 This pairing code is displayed only once and expires in 15 minutes. Enter this code on
-                the physical kiosk screen at <span className="font-mono font-semibold">/terminal/display</span> to authorize the screen.
+                the physical kiosk app at <span className="font-mono font-semibold">http://localhost:3001</span> to authorize the screen.
               </div>
             </div>
 
@@ -476,7 +529,8 @@ export const DisplaysPage: React.FC = () => {
               <Input
                 id="display-name-input"
                 value={registerForm.name}
-                onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
+                maxLength={100}
+                onChange={(e) => setRegisterForm((previous) => ({ ...previous, name: e.target.value }))}
                 placeholder="e.g. Ground Floor Main Entrance Kiosk"
                 required
               />
@@ -489,7 +543,8 @@ export const DisplaysPage: React.FC = () => {
               <Input
                 id="display-location-input"
                 value={registerForm.location}
-                onChange={(e) => setRegisterForm({ ...registerForm, location: e.target.value })}
+                maxLength={200}
+                onChange={(e) => setRegisterForm((previous) => ({ ...previous, location: e.target.value }))}
                 placeholder="e.g. Tower A Lobby, Security Turnstiles"
                 required
               />
@@ -624,6 +679,34 @@ export const DisplaysPage: React.FC = () => {
                 isLoading={updateStatusMutation.isPending}
               >
                 {selectedDisplay.isActive ? "Disable Display" : "Enable Display"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* REMOVE / ARCHIVE CONFIRMATION MODAL */}
+      <Modal
+        isOpen={showArchiveModal}
+        onClose={() => setShowArchiveModal(false)}
+        title="Remove Display from Management"
+        maxWidth="md"
+      >
+        {selectedDisplay && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-semibold">{selectedDisplay.name}</p>
+              <p className="mt-1 font-mono text-xs">{selectedDisplay.terminalId}</p>
+              <p className="mt-3">
+                This display will be archived and removed from the active management list. Its audit history and attendance records are preserved. Its credentials and active QR tokens will be invalidated. Other displays are unaffected.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowArchiveModal(false)}>
+                Cancel
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={handleConfirmArchive} isLoading={archiveMutation.isPending} className="border-red-300 bg-red-600 text-white hover:bg-red-700">
+                Confirm Remove / Archive
               </Button>
             </div>
           </div>

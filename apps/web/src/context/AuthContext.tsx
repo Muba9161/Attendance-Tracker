@@ -18,7 +18,7 @@ interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (credentials: { identifier: string; password: string }) => Promise<void>;
+  login: (credentials: { identifier: string; password: string }) => Promise<AuthUser | null>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -108,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [fetchProfile]);
 
-  const login = async (credentials: { identifier: string; password: string }): Promise<void> => {
+  const login = async (credentials: { identifier: string; password: string }): Promise<AuthUser | null> => {
     setIsLoading(true);
     try {
       // API supports login via either email or employeeId in identifier/email field
@@ -143,8 +143,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           tokenStorage.setCachedUser(userData);
           tokenStorage.setCachedUser(userData);
         }
-        await fetchProfile();
+        return await fetchProfile();
       }
+      return null;
     } catch (err) {
       tokenStorage.clearTokens();
       setUser(null);

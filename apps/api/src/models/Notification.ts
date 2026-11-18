@@ -17,6 +17,7 @@ export interface INotification extends Document {
   title: string;
   message: string;
   payload: Record<string, unknown>;
+  eventId?: string;
   readAt?: Date | null;
   expiresAt?: Date | null;
   createdAt: Date;
@@ -62,6 +63,11 @@ const NotificationSchema = new Schema<INotification>(
       type: Schema.Types.Mixed,
       default: {},
     },
+    eventId: {
+      type: String,
+      trim: true,
+      maxlength: [250, "Event identifier cannot exceed 250 characters"],
+    },
     readAt: {
       type: Date,
       default: null,
@@ -82,6 +88,10 @@ const NotificationSchema = new Schema<INotification>(
 
 NotificationSchema.index({ user: 1, readAt: 1, createdAt: -1 });
 NotificationSchema.index({ user: 1, createdAt: -1 });
+NotificationSchema.index(
+  { user: 1, eventId: 1 },
+  { unique: true, partialFilterExpression: { eventId: { $type: "string" } } }
+);
 
 export const Notification = model<INotification>("Notification", NotificationSchema);
 

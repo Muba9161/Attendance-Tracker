@@ -112,6 +112,10 @@ export interface AttendanceRecordItem {
   isLate: boolean;
   lateMinutes: number;
   durationMinutes: number;
+  shiftName?: string | null;
+  scheduledShiftEndTime?: string | null;
+  isEarlyCheckout?: boolean;
+  earlyCheckoutReason?: string | null;
   isWfh?: boolean;
   isManuallyCorrected?: boolean;
   correctionReason?: string;
@@ -181,7 +185,7 @@ export interface AuditLogsResponse {
 export function useDashboardSummary() {
   return useQuery<DashboardSummaryData>({
     queryKey: ["dashboard-summary"],
-    queryFn: () => api.get<DashboardSummaryData>("/api/dashboard/summary"),
+    queryFn: ({ signal }) => api.get<DashboardSummaryData>("/api/dashboard/summary", { signal }),
     staleTime: 1000 * 30,
     refetchOnWindowFocus: true,
   });
@@ -200,8 +204,8 @@ export function useLiveAnalytics(params?: {
 
   return useQuery<LiveAttendanceAnalyticsResponse>({
     queryKey: ["live-attendance-analytics", params?.dateKey, params?.department],
-    queryFn: () =>
-      api.get<LiveAttendanceAnalyticsResponse>(`/api/analytics/live${qs ? `?${qs}` : ""}`),
+    queryFn: ({ signal }) =>
+      api.get<LiveAttendanceAnalyticsResponse>(`/api/analytics/live${qs ? `?${qs}` : ""}`, { signal }),
     staleTime: 1000 * 30,
     refetchOnWindowFocus: false,
   });
@@ -248,7 +252,7 @@ export interface EmployeeFilters {
 export function useEmployees(filters: EmployeeFilters) {
   return useQuery<EmployeesResponse>({
     queryKey: ["employees", filters],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       if (filters.page) params.set("page", String(filters.page));
       if (filters.limit) params.set("limit", String(filters.limit));
@@ -262,7 +266,7 @@ export function useEmployees(filters: EmployeeFilters) {
       if (filters.sortBy) params.set("sortBy", filters.sortBy);
       if (filters.sortOrder) params.set("sortOrder", filters.sortOrder);
 
-      return api.get<EmployeesResponse>(`/api/employees?${params.toString()}`);
+      return api.get<EmployeesResponse>(`/api/employees?${params.toString()}`, { signal });
     },
     staleTime: 1000 * 20,
   });
@@ -320,10 +324,10 @@ export function useUpdateEmployeeStatus() {
 export function useEmployeeAttendanceSnapshot(employeeId?: string) {
   return useQuery<AttendanceRecordsResponse>({
     queryKey: ["employee-attendance-snapshot", employeeId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!employeeId) throw new Error("Employee ID required");
       return api.get<AttendanceRecordsResponse>(
-        `/api/attendance?employeeId=${encodeURIComponent(employeeId)}&limit=7&sortBy=dateKey&sortOrder=desc`
+        `/api/attendance?employeeId=${encodeURIComponent(employeeId)}&limit=7&sortBy=dateKey&sortOrder=desc`, { signal }
       );
     },
     enabled: Boolean(employeeId),
@@ -353,7 +357,7 @@ export interface AttendanceFilters {
 export function useAttendanceRecords(filters: AttendanceFilters) {
   return useQuery<AttendanceRecordsResponse>({
     queryKey: ["attendance-records", filters],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       if (filters.page) params.set("page", String(filters.page));
       if (filters.limit) params.set("limit", String(filters.limit));
@@ -368,31 +372,70 @@ export function useAttendanceRecords(filters: AttendanceFilters) {
       if (filters.sortBy) params.set("sortBy", filters.sortBy);
       if (filters.sortOrder) params.set("sortOrder", filters.sortOrder);
 
-      return api.get<AttendanceRecordsResponse>(`/api/attendance?${params.toString()}`);
+      return api.get<AttendanceRecordsResponse>(`/api/attendance?${params.toString()}`, { signal });
     },
     staleTime: 1000 * 15,
   });
 }
 
+export function useCalendarAttendanceRange(startDate: string, endDate: string) {
+  return useQuery<AttendanceRecordsResponse>({
+    queryKey: ["calendar-absence-attendance", startDate, endDate],
+    queryFn: async ({ signal }) => {
+      const pageSize = 100;
+      const fetchPage = (page: number) => {
+        const params = new URLSearchParams({
+          status: AttendanceStatus.ABSENT,
+          startDate,
+          endDate,
+          page: String(page),
+          limit: String(pageSize),
+          sortBy: "dateKey",
+          sortOrder: "asc",
+        });
+        return api.get<AttendanceRecordsResponse>(`/api/attendance?${params}`, { signal });
+      };
+      const first = await fetchPage(1);
+      if (!first.success || !Array.isArray(first.data) || !first.pagination) {
+        throw new Error("The attendance API returned an invalid calendar response.");
+      }
+      const pages: AttendanceRecordsResponse[] = [];
+      for (let page = 2; page <= first.pagination.totalPages; page += 5) {
+        const batch = await Promise.all(Array.from(
+          { length: Math.min(5, first.pagination.totalPages - page + 1) },
+          (_, index) => fetchPage(page + index)
+        ));
+        if (batch.some((item) => !item.success || !Array.isArray(item.data) || !item.pagination)) {
+          throw new Error("The attendance API returned an invalid calendar page.");
+        }
+        pages.push(...batch);
+      }
+      return { ...first, data: [...first.data, ...pages.flatMap((page) => page.data)] };
+    },
+    enabled: Boolean(startDate && endDate),
+    staleTime: 1000 * 30,
+  });
+}
+
 export interface AttendanceCorrectionPayload {
-  status?: AttendanceStatus;
   checkInTime?: string | null;
   checkOutTime?: string | null;
+  status?: AttendanceStatus;
   reason: string;
-  isLate?: boolean;
 }
 
 export function useCorrectAttendanceRecord() {
   const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: AttendanceCorrectionPayload }) =>
-      api.patch<{ success: boolean; data: AttendanceRecordItem }>(
-        `/api/attendance/${id}/correct`,
-        payload
+      api.patch<{ success: boolean; message: string; record: AttendanceRecordItem }>(
+        `/api/attendance/${id}/correct`, payload
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["attendance-records"] });
+      queryClient.invalidateQueries({ queryKey: ["report-attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["report-employee-wise"] });
+      queryClient.invalidateQueries({ queryKey: ["report-department-wise"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       queryClient.invalidateQueries({ queryKey: ["audit-logs"] });
     },
@@ -417,7 +460,7 @@ export interface AuditLogFilters {
 export function useAuditLogs(filters: AuditLogFilters) {
   return useQuery<AuditLogsResponse>({
     queryKey: ["audit-logs", filters],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       if (filters.page) params.set("page", String(filters.page));
       if (filters.limit) params.set("limit", String(filters.limit));
@@ -428,7 +471,7 @@ export function useAuditLogs(filters: AuditLogFilters) {
       if (filters.startDate) params.set("startDate", filters.startDate);
       if (filters.endDate) params.set("endDate", filters.endDate);
 
-      return api.get<AuditLogsResponse>(`/api/audit-logs?${params.toString()}`);
+      return api.get<AuditLogsResponse>(`/api/audit-logs?${params.toString()}`, { signal });
     },
     staleTime: 1000 * 20,
   });
@@ -494,8 +537,8 @@ export interface HolidayItem {
 export function useActivePolicy() {
   return useQuery<AttendancePolicyData>({
     queryKey: ["active-policy"],
-    queryFn: async () => {
-      const res = await api.get<{ success: boolean; data: AttendancePolicyData }>("/api/policy");
+    queryFn: async ({ signal }) => {
+      const res = await api.get<{ success: boolean; data: AttendancePolicyData }>("/api/policy", { signal });
       return res.data;
     },
     staleTime: 1000 * 30,
@@ -522,9 +565,9 @@ export function useUpdatePolicy() {
 export function useHolidays(year?: number) {
   return useQuery<{ success: boolean; data: HolidayItem[] }>({
     queryKey: ["holidays", year],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.get<{ success: boolean; data: HolidayItem[] }>(
-        `/api/holidays${year ? `?year=${year}` : ""}`
+        `/api/holidays${year ? `?year=${year}` : ""}`, { signal }
       ),
     staleTime: 1000 * 60,
   });
@@ -604,24 +647,60 @@ export interface WfhFilters {
   status?: string;
   department?: string;
   month?: string;
+  startDate?: string;
+  endDate?: string;
   search?: string;
 }
 
 export function useWfhRequests(filters: WfhFilters) {
   return useQuery<WfhRequestsResponse>({
     queryKey: ["wfh-requests", filters],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams();
       if (filters.page) params.set("page", String(filters.page));
       if (filters.limit) params.set("limit", String(filters.limit));
       if (filters.status && filters.status !== "ALL") params.set("status", filters.status);
       if (filters.department) params.set("department", filters.department);
       if (filters.month) params.set("month", filters.month);
+      if (filters.startDate) params.set("startDate", filters.startDate);
+      if (filters.endDate) params.set("endDate", filters.endDate);
       if (filters.search) params.set("search", filters.search);
 
-      return api.get<WfhRequestsResponse>(`/api/wfh/admin/requests?${params.toString()}`);
+      return api.get<WfhRequestsResponse>(`/api/wfh/admin/requests?${params.toString()}`, { signal });
     },
     staleTime: 1000 * 15,
+  });
+}
+
+export function useCalendarWfhRequests(startDate: string, endDate: string) {
+  return useQuery<WfhRequestsResponse>({
+    queryKey: ["calendar-wfh-requests", startDate, endDate],
+    queryFn: async ({ signal }) => {
+      const pageSize = 100;
+      const fetchPage = (page: number) => {
+        const params = new URLSearchParams({ status: "APPROVED", startDate, endDate,
+          page: String(page), limit: String(pageSize) });
+        return api.get<WfhRequestsResponse>(`/api/wfh/admin/requests?${params}`, { signal });
+      };
+      const first = await fetchPage(1);
+      if (!first.success || !Array.isArray(first.data) || !first.pagination) {
+        throw new Error("The WFH API returned an invalid calendar response.");
+      }
+      const pages: WfhRequestsResponse[] = [];
+      for (let page = 2; page <= first.pagination.totalPages; page += 5) {
+        const batch = await Promise.all(Array.from(
+          { length: Math.min(5, first.pagination.totalPages - page + 1) },
+          (_, index) => fetchPage(page + index)
+        ));
+        if (batch.some((item) => !item.success || !Array.isArray(item.data) || !item.pagination)) {
+          throw new Error("The WFH API returned an invalid calendar page.");
+        }
+        pages.push(...batch);
+      }
+      return { ...first, data: [...first.data, ...pages.flatMap((page) => page.data)] };
+    },
+    enabled: Boolean(startDate && endDate),
+    staleTime: 1000 * 30,
   });
 }
 
@@ -676,7 +755,7 @@ export interface DisplayTerminalItem {
 export function useDisplays() {
   return useQuery<{ success: boolean; data: DisplayTerminalItem[] }>({
     queryKey: ["displays"],
-    queryFn: () => api.get<{ success: boolean; data: DisplayTerminalItem[] }>("/api/displays"),
+    queryFn: ({ signal }) => api.get<{ success: boolean; data: DisplayTerminalItem[] }>("/api/displays", { signal }),
     staleTime: 1000 * 10,
   });
 }
@@ -737,6 +816,21 @@ export function useRevokeDisplay() {
         `/api/displays/${id}/revoke`,
         { reason }
       ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["displays"] });
+      queryClient.invalidateQueries({ queryKey: ["audit-logs"] });
+    },
+  });
+}
+
+export function useArchiveDisplay() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.delete<{ success: boolean; message: string }>(`/api/displays/${id}`, {
+        body: JSON.stringify({ reason }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["displays"] });
       queryClient.invalidateQueries({ queryKey: ["audit-logs"] });
@@ -835,10 +929,11 @@ export interface WfhReportItem {
   createdAt: string;
 }
 
-export function useAttendanceSummaryReport(params: ReportFilterParams) {
+export function useAttendanceSummaryReport(params: ReportFilterParams, enabled = true) {
   return useQuery<AttendanceSummaryReportResponse>({
     queryKey: ["report-attendance", params],
-    queryFn: () => {
+    enabled,
+    queryFn: ({ signal }) => {
       const q = new URLSearchParams();
       if (params.startDate) q.set("startDate", params.startDate);
       if (params.endDate) q.set("endDate", params.endDate);
@@ -847,20 +942,21 @@ export function useAttendanceSummaryReport(params: ReportFilterParams) {
       if (params.search) q.set("search", params.search);
       if (params.page) q.set("page", String(params.page));
       if (params.limit) q.set("limit", String(params.limit));
-      return api.get<AttendanceSummaryReportResponse>(`/api/reports/attendance?${q.toString()}`);
+      return api.get<AttendanceSummaryReportResponse>(`/api/reports/attendance?${q.toString()}`, { signal });
     },
     staleTime: 1000 * 30,
   });
 }
 
-export function useEmployeeWiseReport(params: ReportFilterParams) {
+export function useEmployeeWiseReport(params: ReportFilterParams, enabled = true) {
   return useQuery<{
     success: boolean;
     data: EmployeeWiseReportItem[];
     pagination: { total: number; page: number; limit: number; totalPages: number };
   }>({
     queryKey: ["report-employee-wise", params],
-    queryFn: () => {
+    enabled,
+    queryFn: ({ signal }) => {
       const q = new URLSearchParams();
       if (params.startDate) q.set("startDate", params.startDate);
       if (params.endDate) q.set("endDate", params.endDate);
@@ -868,38 +964,40 @@ export function useEmployeeWiseReport(params: ReportFilterParams) {
       if (params.search) q.set("search", params.search);
       if (params.page) q.set("page", String(params.page));
       if (params.limit) q.set("limit", String(params.limit));
-      return api.get(`/api/reports/employee-wise?${q.toString()}`);
+      return api.get(`/api/reports/employee-wise?${q.toString()}`, { signal });
     },
     staleTime: 1000 * 30,
   });
 }
 
-export function useDepartmentWiseReport(params: ReportFilterParams) {
+export function useDepartmentWiseReport(params: ReportFilterParams, enabled = true) {
   return useQuery<{
     success: boolean;
     data: DepartmentWiseReportItem[];
     pagination: { total: number; page: number; limit: number; totalPages: number };
   }>({
     queryKey: ["report-department-wise", params],
-    queryFn: () => {
+    enabled,
+    queryFn: ({ signal }) => {
       const q = new URLSearchParams();
       if (params.startDate) q.set("startDate", params.startDate);
       if (params.endDate) q.set("endDate", params.endDate);
       if (params.department) q.set("department", params.department);
-      return api.get(`/api/reports/department-wise?${q.toString()}`);
+      return api.get(`/api/reports/department-wise?${q.toString()}`, { signal });
     },
     staleTime: 1000 * 30,
   });
 }
 
-export function useLateReport(params: ReportFilterParams) {
+export function useLateReport(params: ReportFilterParams, enabled = true) {
   return useQuery<{
     success: boolean;
     data: LateReportItem[];
     pagination: { total: number; page: number; limit: number; totalPages: number };
   }>({
     queryKey: ["report-late", params],
-    queryFn: () => {
+    enabled,
+    queryFn: ({ signal }) => {
       const q = new URLSearchParams();
       if (params.startDate) q.set("startDate", params.startDate);
       if (params.endDate) q.set("endDate", params.endDate);
@@ -907,20 +1005,21 @@ export function useLateReport(params: ReportFilterParams) {
       if (params.search) q.set("search", params.search);
       if (params.page) q.set("page", String(params.page));
       if (params.limit) q.set("limit", String(params.limit));
-      return api.get(`/api/reports/late?${q.toString()}`);
+      return api.get(`/api/reports/late?${q.toString()}`, { signal });
     },
     staleTime: 1000 * 30,
   });
 }
 
-export function useWfhReport(params: ReportFilterParams) {
+export function useWfhReport(params: ReportFilterParams, enabled = true) {
   return useQuery<{
     success: boolean;
     data: WfhReportItem[];
     pagination: { total: number; page: number; limit: number; totalPages: number };
   }>({
     queryKey: ["report-wfh", params],
-    queryFn: () => {
+    enabled,
+    queryFn: ({ signal }) => {
       const q = new URLSearchParams();
       if (params.startDate) q.set("startDate", params.startDate);
       if (params.endDate) q.set("endDate", params.endDate);
@@ -929,7 +1028,7 @@ export function useWfhReport(params: ReportFilterParams) {
       if (params.search) q.set("search", params.search);
       if (params.page) q.set("page", String(params.page));
       if (params.limit) q.set("limit", String(params.limit));
-      return api.get(`/api/reports/wfh?${q.toString()}`);
+      return api.get(`/api/reports/wfh?${q.toString()}`, { signal });
     },
     staleTime: 1000 * 30,
   });
@@ -980,6 +1079,85 @@ export function useUpdateFeatureFlag() {
   });
 }
 
+export interface HrManagementItem {
+  id: string;
+  email: string;
+  name: string;
+  role: "HR";
+  accountStatus: string;
+  invitationStatus: "Pending" | "Accepted" | "Expired";
+  createdAt: string;
+  department: string;
+  designation: string;
+}
+
+export function useHrManagement() {
+  return useQuery<{ success: boolean; data: HrManagementItem[] }>({
+    queryKey: ["hr-management"],
+    queryFn: ({ signal }) => api.get("/api/auth/hr-management", { signal }),
+    staleTime: 1000 * 15,
+  });
+}
+
+export function useInviteHr() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invite: { name: string; email: string; department: string; designation: string }) =>
+      api.post("/api/auth/invite", { ...invite, role: "HR" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hr-management"] }),
+  });
+}
+
+export function useCreateHrAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (account: {
+      name: string;
+      email: string;
+      department: string;
+      designation: string;
+      password: string;
+    }) => api.post("/api/auth/hr-management", account),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hr-management"] }),
+  });
+}
+
+export function useUpdateHrStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, status }: { userId: string; status: "ACTIVE" | "INACTIVE" }) =>
+      api.patch(`/api/auth/hr-management/${userId}/status`, { status }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hr-management"] }),
+  });
+}
+
+export function useUpdateHrManagementRecord() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ recordId, details }: {
+      recordId: string;
+      details: { name: string; department: string; designation: string };
+    }) => api.patch(`/api/auth/hr-management/${recordId}`, details),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hr-management"] }),
+  });
+}
+
+export function useDeleteHrManagementRecord() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId: string) => api.delete(`/api/auth/hr-management/${recordId}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hr-management"] }),
+  });
+}
+
+export function useResendHrInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (recordId: string) => api.post(`/api/auth/hr-management/${recordId}/resend`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["hr-management"] }),
+  });
+}
+
 // =============================================================================
 // Staff Authentication, Sessions, Hardware Security & Audit
 // =============================================================================
@@ -1013,7 +1191,7 @@ export interface TrustedDeviceItem {
 export function useStaffSessions() {
   return useQuery<{ success: boolean; data: StaffSessionItem[] }>({
     queryKey: ["staff-sessions"],
-    queryFn: () => api.get("/api/auth/staff/sessions"),
+    queryFn: ({ signal }) => api.get("/api/auth/staff/sessions", { signal }),
     staleTime: 1000 * 10,
     refetchInterval: 15000,
   });
@@ -1042,7 +1220,7 @@ export function useRevokeAllSessions() {
 export function useTrustedDevices() {
   return useQuery<{ success: boolean; data: TrustedDeviceItem[] }>({
     queryKey: ["trusted-devices"],
-    queryFn: () => api.get("/api/auth/staff/devices"),
+    queryFn: ({ signal }) => api.get("/api/auth/staff/devices", { signal }),
     staleTime: 1000 * 30,
   });
 }
@@ -1127,9 +1305,9 @@ export interface HolidayPreviewResponse {
 export function useCalendarEvents(year?: number) {
   return useQuery<{ success: boolean; data: CalendarEventItem[] }>({
     queryKey: ["calendar-events", year],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.get<{ success: boolean; data: CalendarEventItem[] }>(
-        `/api/calendar/events${year ? `?year=${year}` : ""}`
+        `/api/calendar/events${year ? `?year=${year}` : ""}`, { signal }
       ),
     staleTime: 1000 * 60,
   });
@@ -1138,7 +1316,7 @@ export function useCalendarEvents(year?: number) {
 export function useDayType(date: string, enabled = true) {
   return useQuery<DayTypeResponse>({
     queryKey: ["calendar-day-type", date],
-    queryFn: () => api.get<DayTypeResponse>(`/api/calendar/day-type?date=${date}`),
+    queryFn: ({ signal }) => api.get<DayTypeResponse>(`/api/calendar/day-type?date=${date}`, { signal }),
     enabled: enabled && !!date,
     staleTime: 1000 * 60 * 5,
   });
@@ -1529,9 +1707,9 @@ export function useLeaveRequests(filters?: {
 
   return useQuery<LeaveRequestListResponse>({
     queryKey: ["leave-requests", filters],
-    queryFn: () =>
-      api.get<LeaveRequestListResponse>(`/api/leave/requests${queryString ? `?${queryString}` : ""}`),
-    staleTime: 1000 * 15,
+    queryFn: ({ signal }) =>
+      api.get<LeaveRequestListResponse>(`/api/leave/requests${queryString ? `?${queryString}` : ""}`, { signal }),
+    staleTime: 1000 * 30,
   });
 }
 
@@ -1732,7 +1910,7 @@ export function useAdminAnnouncements(params?: {
 
   return useQuery<AdminAnnouncementListResponse>({
     queryKey: ["admin-announcements", params],
-    queryFn: () => api.get(url),
+    queryFn: ({ signal }) => api.get(url, { signal }),
     staleTime: 1000 * 15,
   });
 }
@@ -1740,7 +1918,7 @@ export function useAdminAnnouncements(params?: {
 export function useUnreadAnnouncementsCount() {
   return useQuery<{ success: boolean; unreadCount: number }>({
     queryKey: ["announcements-unread-count"],
-    queryFn: () => api.get("/api/announcements/unread-count"),
+    queryFn: ({ signal }) => api.get("/api/announcements/unread-count", { signal }),
     staleTime: 1000 * 30,
   });
 }
@@ -1975,8 +2153,8 @@ export interface EnquiryCountsData {
 export function useEnquiryCounts() {
   return useQuery<{ success: boolean; data: EnquiryCountsData }>({
     queryKey: ["enquiry-counts"],
-    queryFn: () => api.get<{ success: boolean; data: EnquiryCountsData }>("/api/enquiries/counts"),
-    staleTime: 1000 * 15,
+    queryFn: ({ signal }) => api.get<{ success: boolean; data: EnquiryCountsData }>("/api/enquiries/counts", { signal }),
+    staleTime: 1000 * 30,
   });
 }
 
@@ -1993,8 +2171,8 @@ export function useEnquiries(filters: EnquiriesFilters = {}) {
   const qs = query.toString();
   return useQuery<EnquiriesResponse>({
     queryKey: ["enquiries", filters],
-    queryFn: () => api.get<EnquiriesResponse>(`/api/enquiries${qs ? `?${qs}` : ""}`),
-    staleTime: 1000 * 15,
+    queryFn: ({ signal }) => api.get<EnquiriesResponse>(`/api/enquiries${qs ? `?${qs}` : ""}`, { signal }),
+    staleTime: 1000 * 30,
   });
 }
 

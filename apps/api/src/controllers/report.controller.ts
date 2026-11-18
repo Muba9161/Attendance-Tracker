@@ -48,6 +48,9 @@ export const getAttendanceSummaryReport = asyncHandler(async (req: Request, res:
       "Status",
       "Late",
       "WFH",
+      "Early Checkout",
+      "Scheduled Shift End",
+      "Early Checkout Reason",
     ];
 
     const rows = result.data.map((r) => {
@@ -63,6 +66,9 @@ export const getAttendanceSummaryReport = asyncHandler(async (req: Request, res:
         r.status,
         r.isLate ? "YES" : "NO",
         r.isWfh ? "YES" : "NO",
+        r.isEarlyCheckout ? "YES" : "NO",
+        r.scheduledShiftEndTime ? new Date(r.scheduledShiftEndTime).toISOString() : "",
+        r.earlyCheckoutReason || "",
       ];
     });
 

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { KeyRound, ArrowRight, ArrowLeft, Sparkles } from 'lucide-react-native';
+import { KeyRound, ArrowRight, ArrowLeft } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../src/context/AuthContext';
 import {
@@ -14,9 +14,8 @@ import {
   Notice,
   Text,
   PageHeader,
-  PressableScale,
 } from '../src/components';
-import { colors, radii, spacing } from '../src/theme/tokens';
+import { colors, spacing } from '../src/theme/tokens';
 import { useResponsive } from '../src/lib/responsive';
 import { ApiError } from '../src/services/api';
 
@@ -25,22 +24,25 @@ export default function VerifyOtpScreen() {
   const params = useLocalSearchParams<{
     employeeId: string;
     maskedEmail: string;
-    simulatedOtp?: string;
   }>();
 
-  const { registerVerify, registerStart } = useAuth();
+  const { registerVerify, registerResend } = useAuth();
   const { isWide } = useResponsive();
 
   const employeeId = params.employeeId || '';
   const maskedEmail = params.maskedEmail || 'your email';
-  const initialSimulatedOtp = params.simulatedOtp || '';
-
   const [otp, setOtp] = useState('');
-  const [currentSimulatedOtp, setCurrentSimulatedOtp] = useState(initialSimulatedOtp);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resendSuccess, setResendSuccess] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(60);
+
+  useEffect(() => {
+    if (resendCountdown <= 0) return;
+    const timer = setTimeout(() => setResendCountdown((value) => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCountdown]);
 
   const handleVerify = async () => {
     const cleanOtp = otp.trim();
@@ -90,24 +92,14 @@ export default function VerifyOtpScreen() {
     setResendSuccess(false);
 
     try {
-      const res = await registerStart(employeeId);
-      const raw = res as unknown as Record<string, string | undefined>;
-      const targetOtp = res.data?.simulatedOtp || raw.simulatedDemoOtp || raw.simulatedOtp || '';
-      if (targetOtp) setCurrentSimulatedOtp(targetOtp);
+      await registerResend(employeeId);
+      setResendCountdown(60);
       setResendSuccess(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    } catch {
-      setError('Failed to resend verification code. Please try again later.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to resend verification code. Please try again later.');
     } finally {
       setResending(false);
-    }
-  };
-
-  const fillSimulatedOtp = () => {
-    if (currentSimulatedOtp) {
-      setOtp(currentSimulatedOtp);
-      setError(null);
-      void Haptics.selectionAsync().catch(() => undefined);
     }
   };
 
@@ -133,8 +125,9 @@ export default function VerifyOtpScreen() {
         <Card style={styles.card} padding={22} variant="raised">
           {error ? <Notice tone="danger" title="Verification Failed" message={error} /> : null}
           {resendSuccess ? (
-            <Notice tone="success" title="Code Resent" message="A new OTP has been dispatched." />
+            <Notice tone="success" title="Code Resent" message="Verification code sent to your registered email." />
           ) : null}
+          <Text variant="small" color={colors.textSecondary}>Verification code sent to your registered email.</Text>
 
           <Field label="6-Digit OTP" required hint="Code expires in 10 minutes">
             <Input
@@ -153,21 +146,6 @@ export default function VerifyOtpScreen() {
             />
           </Field>
 
-          {/* Demo Simulated OTP pill */}
-          {currentSimulatedOtp ? (
-            <PressableScale
-              accessibilityRole="button"
-              haptic="selection"
-              onPress={fillSimulatedOtp}
-              style={styles.demoPill}
-            >
-              <Sparkles size={14} color={colors.indigoSoft} />
-              <Text variant="small" color={colors.indigoSoft} weight="medium">
-                Simulated demo OTP: {currentSimulatedOtp} (Tap to fill)
-              </Text>
-            </PressableScale>
-          ) : null}
-
           <Button
             label={loading ? 'Verifying...' : 'Verify & Continue'}
             loading={loading}
@@ -181,9 +159,9 @@ export default function VerifyOtpScreen() {
             <Text variant="small" color={colors.textSecondary}>
               Didn't receive code?
             </Text>
-            <TouchableOpacity onPress={handleResend} disabled={resending} style={styles.resendBtn}>
+            <TouchableOpacity onPress={handleResend} disabled={resending || resendCountdown > 0} style={styles.resendBtn}>
               <Text variant="small" color={colors.indigoSoft} weight="semibold">
-                {resending ? 'Sending...' : 'Resend Code'}
+                {resending ? 'Sending...' : resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : 'Resend Code'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -216,18 +194,6 @@ const styles = StyleSheet.create({
   card: {
     gap: spacing.lg,
     marginTop: spacing.sm,
-  },
-  demoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: radii.sm,
-    backgroundColor: 'rgba(89, 101, 242, 0.08)',
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.2)',
   },
   resendRow: {
     flexDirection: 'row',

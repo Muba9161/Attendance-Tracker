@@ -47,7 +47,7 @@ router.get(
 );
 
 // ==========================================
-// HR / Admin Attendance Ledger & Corrections
+// HR read-only attendance ledger; ADMIN may apply audited corrections.
 // ==========================================
 
 // GET /attendance - List records with filters, search, and pagination (HR/Admin only)
@@ -58,17 +58,9 @@ router.get(
   attendanceController.listAttendanceRecords
 );
 
-// PATCH /attendance/:id & /attendance/:id/correct - Manual administrative correction (HR/Admin only)
 router.patch(
   "/:id/correct",
-  requireRole(UserRole.HR, UserRole.ADMIN),
-  validate({ body: AttendanceCorrectionRequestSchema }),
-  attendanceController.correctAttendanceRecord
-);
-
-router.patch(
-  "/:id",
-  requireRole(UserRole.HR, UserRole.ADMIN),
+  requireRole(UserRole.ADMIN),
   validate({ body: AttendanceCorrectionRequestSchema }),
   attendanceController.correctAttendanceRecord
 );

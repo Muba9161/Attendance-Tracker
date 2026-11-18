@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   Alert,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   Briefcase,
   Building2,
@@ -99,7 +99,7 @@ export default function ProfileScreen() {
   const [employeeDetails, setEmployeeDetails] = useState<EmployeeDetails | null>(null);
   const [policyData, setPolicyData] = useState<PolicyData | null>(null);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let isMounted = true;
     Promise.allSettled([employeeApi.getMyProfile(), policyApi.getPolicy()])
       .then(([empRes, polRes]) => {
@@ -116,7 +116,7 @@ export default function ProfileScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, []));
 
   const handleLogout = () => {
     const performLogout = async () => {
@@ -167,12 +167,14 @@ export default function ProfileScreen() {
     }
   };
 
-  const shift = policyData?.shifts?.[0];
+  const shift = employeeDetails?.shiftId
+    ? policyData?.shifts?.find((item) => item._id === employeeDetails.shiftId)
+    : policyData?.shifts?.[0];
   const workdaysStr = policyData?.workdays
     ? policyData.workdays
         .map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d])
         .join(', ')
-    : 'Mon, Tue, Wed, Thu, Fri';
+    : '—';
 
   const joiningFormatted = employeeDetails?.joiningDate
     ? new Date(employeeDetails.joiningDate).toLocaleDateString(undefined, {
@@ -180,27 +182,27 @@ export default function ProfileScreen() {
         day: 'numeric',
         year: 'numeric',
       })
-    : 'March 1, 2024';
+    : '—';
 
   return (
     <Screen edges={['top', 'bottom']}>
       <PageHeader
-        title={user?.name ?? 'Your Profile'}
+        title={employeeDetails?.name ?? user?.name ?? 'Your Profile'}
         subtitle={employeeDetails?.designation || user?.department || 'Employee Profile'}
-        right={<Avatar name={user?.name ?? 'VX'} showRing size={48} />}
+        right={<Avatar name={employeeDetails?.name ?? user?.name ?? 'VX'} showRing size={48} />}
       />
 
       <View style={[styles.container, isWide && styles.containerWide]}>
         {/* 1. Identity Card */}
         <Card style={styles.identityCard} variant="raised" padding={20}>
           <View style={styles.identityRow}>
-            <Avatar name={user?.name ?? 'VX'} size={68} />
+            <Avatar name={employeeDetails?.name ?? user?.name ?? 'VX'} size={68} />
             <View style={styles.identityCopy}>
               <Text variant="subheading" numberOfLines={1}>
-                {user?.name ?? 'VorldX Employee'}
+                {employeeDetails?.name ?? user?.name ?? 'Employee'}
               </Text>
               <Text variant="small" color={colors.textSecondary} numberOfLines={1}>
-                {user?.employeeId} · {user?.email}
+                {employeeDetails?.employeeId ?? user?.employeeId ?? '—'} · {employeeDetails?.email ?? user?.email ?? '—'}
               </Text>
               <View style={styles.badgeRow}>
                 <Badge dot label={user?.role || 'EMPLOYEE'} tone="indigo" />
@@ -213,22 +215,22 @@ export default function ProfileScreen() {
         {/* 2. Work Details Section */}
         <SectionHeader title="Profile details" />
         <Card padding={0}>
-          <InfoRow icon={Hash} label="Employee ID" value={user?.employeeId ?? '—'} />
-          <InfoRow icon={Mail} label="Work email" value={user?.email ?? '—'} />
+          <InfoRow icon={Hash} label="Employee ID" value={employeeDetails?.employeeId ?? user?.employeeId ?? '—'} />
+          <InfoRow icon={Mail} label="Work email" value={employeeDetails?.email ?? user?.email ?? '—'} />
           <InfoRow
             icon={Briefcase}
             label="Department"
-            value={employeeDetails?.department || user?.department || 'Engineering'}
+            value={employeeDetails?.department || user?.department || '—'}
           />
           <InfoRow
             icon={Building2}
             label="Designation"
-            value={employeeDetails?.designation || 'Software Engineer'}
+            value={employeeDetails?.designation || '—'}
           />
           <InfoRow
             icon={UserCheck}
             label="Employment type"
-            value={employeeDetails?.workType || 'Full-Time'}
+            value={employeeDetails?.workType || '—'}
           />
           <InfoRow icon={CalendarDays} label="Joining date" value={joiningFormatted} last />
         </Card>
@@ -239,12 +241,12 @@ export default function ProfileScreen() {
           <InfoRow
             icon={Clock3}
             label="Shift timings"
-            value={shift ? `${shift.startTime} – ${shift.endTime}` : '09:30 AM – 06:30 PM'}
+            value={shift ? `${shift.startTime} – ${shift.endTime}` : 'Not assigned'}
           />
           <InfoRow
             icon={ShieldCheck}
             label="Grace period"
-            value={shift ? `${shift.graceMinutes} minutes` : '15 minutes'}
+            value={shift ? `${shift.graceMinutes} minutes` : '—'}
           />
           <InfoRow icon={Globe2} label="Working days" value={workdaysStr} last />
         </Card>
@@ -347,7 +349,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: 'rgba(89, 101, 242, 0.1)',
+    backgroundColor: 'rgba(20, 127, 181, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },

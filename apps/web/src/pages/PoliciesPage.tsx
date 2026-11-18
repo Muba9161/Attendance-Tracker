@@ -21,6 +21,7 @@ import { Modal } from "../components/ui/Modal";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import { useSocket } from "../context/SocketContext";
 import {
@@ -73,14 +74,19 @@ export const PoliciesPage: React.FC = () => {
   const {
     data: activePolicy,
     isLoading: isPolicyLoading,
+    isFetching: isPolicyFetching,
+    isError: isPolicyError,
+    error: policyError,
     refetch: refetchPolicy,
   } = useActivePolicy();
 
   const currentYear = new Date().getFullYear();
-  const { data: holidaysResponse, isLoading: isHolidaysLoading } = useHolidays(currentYear);
+  const { data: holidaysResponse, isLoading: isHolidaysLoading, isFetching: isHolidaysFetching,
+    isError: isHolidaysError, error: holidaysError, refetch: refetchHolidays } = useHolidays(currentYear);
   const holidays = holidaysResponse?.data || [];
 
-  const { data: auditResponse, isLoading: isAuditLoading } = useAuditLogs({
+  const { data: auditResponse, isLoading: isAuditLoading, isFetching: isAuditFetching,
+    isError: isAuditError, error: auditError, refetch: refetchAudit } = useAuditLogs({
     entityType: "POLICY",
     limit: 10,
   });
@@ -405,6 +411,21 @@ export const PoliciesPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {activeTab === "policy" && isPolicyError && activePolicy && (
+        <ErrorState title="Policy refresh failed"
+          message={policyError instanceof Error ? policyError.message : "Showing the last successfully loaded policy."}
+          onRetry={() => void refetchPolicy()} isRetrying={isPolicyFetching} className="p-4" />
+      )}
+      {activeTab === "holidays" && isHolidaysError && holidaysResponse && (
+        <ErrorState title="Holiday refresh failed"
+          message={holidaysError instanceof Error ? holidaysError.message : "Showing the last successfully loaded holidays."}
+          onRetry={() => void refetchHolidays()} isRetrying={isHolidaysFetching} className="p-4" />
+      )}
+      {activeTab === "history" && isAuditError && auditResponse && (
+        <ErrorState title="Policy history refresh failed"
+          message={auditError instanceof Error ? auditError.message : "Showing the last successfully loaded history."}
+          onRetry={() => void refetchAudit()} isRetrying={isAuditFetching} className="p-4" />
+      )}
       {/* Top Header & Version Indicator */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
         <div>
@@ -487,6 +508,10 @@ export const PoliciesPage: React.FC = () => {
               <Skeleton className="h-32 w-full" />
               <Skeleton className="h-64 w-full" />
             </div>
+          ) : isPolicyError && !activePolicy ? (
+            <ErrorState title="Unable to load attendance policy"
+              message={policyError instanceof Error ? policyError.message : "The policy request failed."}
+              onRetry={() => void refetchPolicy()} isRetrying={isPolicyFetching} />
           ) : (
             <>
               {/* Core Parameters Grid */}
@@ -905,6 +930,10 @@ export const PoliciesPage: React.FC = () => {
 
           {isHolidaysLoading ? (
             <Skeleton className="h-40 w-full" />
+          ) : isHolidaysError && !holidaysResponse ? (
+            <ErrorState title="Unable to load holidays"
+              message={holidaysError instanceof Error ? holidaysError.message : "The holidays request failed."}
+              onRetry={() => void refetchHolidays()} isRetrying={isHolidaysFetching} />
           ) : holidays.length === 0 ? (
             <EmptyState
               icon={<Calendar className="w-6 h-6 text-slate-400" />}
@@ -984,6 +1013,10 @@ export const PoliciesPage: React.FC = () => {
 
           {isAuditLoading ? (
             <Skeleton className="h-48 w-full" />
+          ) : isAuditError && !auditResponse ? (
+            <ErrorState title="Unable to load policy history"
+              message={auditError instanceof Error ? auditError.message : "The audit request failed."}
+              onRetry={() => void refetchAudit()} isRetrying={isAuditFetching} />
           ) : policyAuditEvents.length === 0 ? (
             <EmptyState
               icon={<History className="w-6 h-6 text-slate-400" />}

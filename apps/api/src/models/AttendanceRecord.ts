@@ -52,6 +52,11 @@ export interface IAttendanceRecord extends Document {
   policyId?: Types.ObjectId;
   policyVersion?: number;
   terminalId?: string;
+  shiftId?: Types.ObjectId | null;
+  shiftName?: string | null;
+  scheduledShiftEndTime?: Date | null;
+  isEarlyCheckout: boolean;
+  earlyCheckoutReason?: string | null;
   systemNotes?: string;
   // History preservation: stores original values before administrative correction
   originalValues?: IOriginalAttendanceValues;
@@ -172,6 +177,11 @@ const AttendanceRecordSchema = new Schema<IAttendanceRecord>(
       type: String,
       default: null,
     },
+    shiftId: { type: Schema.Types.ObjectId, default: null },
+    shiftName: { type: String, default: null },
+    scheduledShiftEndTime: { type: Date, default: null },
+    isEarlyCheckout: { type: Boolean, default: false, index: true },
+    earlyCheckoutReason: { type: String, default: null, trim: true, maxlength: 500 },
     systemNotes: {
       type: String,
       default: null,

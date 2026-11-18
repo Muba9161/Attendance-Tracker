@@ -29,7 +29,7 @@ export const LeaveTypeSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(50),
   code: z.string().min(1).max(10).toUpperCase(),
   paid: z.boolean().default(true),
-  annualQuota: z.number().nonnegative().default(12),
+  annualQuota: z.number().nonnegative(),
   carryForwardRule: CarryForwardRuleSchema.default({ allowed: false, maxDays: 0 }),
   halfDayAllowed: z.boolean().default(true),
   description: z.string().max(300).optional(),

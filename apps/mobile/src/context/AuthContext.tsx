@@ -18,6 +18,7 @@ interface AuthContextValue {
   sessionExpired: boolean;
   login: (emailOrEmployeeId: string, password: string) => Promise<void>;
   registerStart: (employeeId: string) => Promise<RegisterStartResponse>;
+  registerResend: (employeeId: string) => Promise<RegisterStartResponse>;
   registerVerify: (employeeId: string, otp: string) => Promise<RegisterVerifyResponse>;
   registerComplete: (employeeId: string, verificationToken: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -84,6 +85,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return authApi.registerStart(employeeId);
   };
 
+  const registerResend = async (employeeId: string): Promise<RegisterStartResponse> => {
+    return authApi.registerResend(employeeId);
+  };
+
   const registerVerify = async (employeeId: string, otp: string): Promise<RegisterVerifyResponse> => {
     return authApi.registerVerify(employeeId, otp);
   };
@@ -140,6 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sessionExpired,
         login,
         registerStart,
+        registerResend,
         registerVerify,
         registerComplete,
         logout,

@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   FlatList,
-  ScrollView,
   TextInput,
   Modal,
   Image,
@@ -586,11 +585,7 @@ export default function EnquiriesScreen() {
             <View style={styles.tabContent}>
               {/* Status Filter Horizontal Pills */}
               <View style={styles.filterBar}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.filterScroll}
-                >
+                <View style={styles.filterScroll}>
                   {(
                     [
                       { key: 'ALL', label: `All (${counts.all})` },
@@ -617,7 +612,7 @@ export default function EnquiriesScreen() {
                       </PressableScale>
                     );
                   })}
-                </ScrollView>
+                </View>
               </View>
 
               {/* State: Loading */}
@@ -1283,6 +1278,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   filterScroll: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
@@ -1296,7 +1293,7 @@ const styles = StyleSheet.create({
   },
   filterPillActive: {
     borderColor: colors.indigoSoft,
-    backgroundColor: 'rgba(89, 101, 242, 0.18)',
+    backgroundColor: 'rgba(20, 127, 181, 0.18)',
   },
   skeletonContainer: {
     paddingHorizontal: spacing.lg,
@@ -1324,7 +1321,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: 'rgba(89, 101, 242, 0.12)',
+    backgroundColor: 'rgba(20, 127, 181, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.sm,
@@ -1355,13 +1352,17 @@ const styles = StyleSheet.create({
   },
   ticketCardHeader: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.sm,
   },
   ticketMetaLeft: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: spacing.sm,
+    flexShrink: 1,
   },
   ticketNumber: {
     color: colors.indigoSoft,
@@ -1452,7 +1453,7 @@ const styles = StyleSheet.create({
   },
   categoryCardSelected: {
     borderColor: colors.indigo,
-    backgroundColor: 'rgba(89, 101, 242, 0.18)',
+    backgroundColor: 'rgba(20, 127, 181, 0.18)',
   },
   categoryIconCircle: {
     width: 34,
@@ -1505,7 +1506,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(140, 149, 255, 0.4)',
     borderRadius: radii.lg,
     paddingVertical: spacing.md,
-    backgroundColor: 'rgba(89, 101, 242, 0.06)',
+    backgroundColor: 'rgba(20, 127, 181, 0.06)',
   },
   attachmentCard: {
     flexDirection: 'row',
@@ -1521,7 +1522,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: radii.sm,
-    backgroundColor: 'rgba(89, 101, 242, 0.15)',
+    backgroundColor: 'rgba(20, 127, 181, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1538,7 +1539,7 @@ const styles = StyleSheet.create({
   // Modal / Thread Styles
   modalRoot: {
     flex: 1,
-    backgroundColor: '#07080E',
+    backgroundColor: '#142538',
   },
   modalSafeArea: {
     flex: 1,
@@ -1555,7 +1556,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    backgroundColor: 'rgba(13, 16, 27, 0.88)',
+    backgroundColor: 'rgba(29, 53, 75, 0.88)',
     gap: spacing.md,
   },
   modalBackBtn: {
@@ -1655,7 +1656,7 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   resolvedBanner: {
-    backgroundColor: 'rgba(13, 16, 27, 0.95)',
+    backgroundColor: 'rgba(29, 53, 75, 0.95)',
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingHorizontal: spacing.lg,
@@ -1684,7 +1685,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
   },
   replyBar: {
-    backgroundColor: 'rgba(13, 16, 27, 0.92)',
+    backgroundColor: 'rgba(29, 53, 75, 0.92)',
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingHorizontal: spacing.lg,
@@ -1750,7 +1751,7 @@ const styles = StyleSheet.create({
   dialogCard: {
     width: '100%',
     maxWidth: 420,
-    backgroundColor: '#0D101B',
+    backgroundColor: '#1D354B',
     borderRadius: radii.xxl,
     borderWidth: 1,
     borderColor: colors.borderActive,

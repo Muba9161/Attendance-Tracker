@@ -22,13 +22,13 @@ export const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired, initialC
       const urlParams = new URLSearchParams(window.location.search);
       const urlCode = urlParams.get("code") || urlParams.get("pairingCode");
       if (urlCode && !code) {
-        setCode(urlCode.trim().toUpperCase());
+        setCode(urlCode);
       }
     }
   }, [code]);
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.toUpperCase();
+    let val = e.target.value;
     // Auto-prefix VX- if staff starts typing 4 digits
     if (/^\d{1,4}$/.test(val) && !val.startsWith("VX-")) {
       val = `VX-${val}`;
@@ -39,7 +39,7 @@ export const PairingScreen: React.FC<PairingScreenProps> = ({ onPaired, initialC
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = code.replace(/\s+/g, '').toUpperCase();
+    const cleanCode = code.trim();
 
     if (!cleanCode) {
       setError("Please enter the pairing code from the HR dashboard.");

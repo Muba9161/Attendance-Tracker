@@ -204,8 +204,8 @@ export const AttendanceChart: React.FC<AttendanceChartProps> = ({
                     <stop offset="95%" stopColor="#F59E0B" stopOpacity={0.0} />
                   </linearGradient>
                   <linearGradient id="colorWfh" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366F1" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#6366F1" stopOpacity={0.0} />
+                    <stop offset="5%" stopColor="#147FB5" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#147FB5" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
 
@@ -276,7 +276,7 @@ export const AttendanceChart: React.FC<AttendanceChartProps> = ({
                   type="monotone"
                   dataKey="wfhCount"
                   name="Approved WFH"
-                  stroke="#6366F1"
+                  stroke="#147FB5"
                   fillOpacity={1}
                   fill="url(#colorWfh)"
                   strokeWidth={2}

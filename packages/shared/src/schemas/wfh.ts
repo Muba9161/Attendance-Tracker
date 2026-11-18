@@ -57,6 +57,8 @@ export const WfhFilterQuerySchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}$/, "Month must be in YYYY-MM format")
     .optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   search: z.string().trim().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),

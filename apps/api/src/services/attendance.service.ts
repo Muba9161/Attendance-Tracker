@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import crypto from "crypto";
 import {
   AttendanceRecord,
   IAttendanceRecord,
@@ -26,6 +27,7 @@ import {
   AttendanceFilterQuery,
   AttendanceCorrectionRequest,
   ShiftDefinition,
+  getShiftWindow,
 } from "@vorldx/shared";
 
 export interface ScanResult {
@@ -101,6 +103,7 @@ export async function scanAttendance(
     qrPayload?: string;
     action?: "CHECK_IN" | "CHECK_OUT";
     simulatedNow?: Date;
+    earlyCheckoutReason?: string;
   }
 ): Promise<ScanResult> {
   const tokenString = (params.token || params.qrPayload || "").trim();
@@ -130,7 +133,7 @@ export async function scanAttendance(
   const qrResult = await qrService.validateQrToken(tokenString);
   if (!qrResult.isValid) {
     throw new AppError(
-      400,
+      qrResult.code === ApiErrorCode.ERR_QR_REPLAY_DETECTED ? 409 : 400,
       (qrResult.code as ApiErrorCodeType) || ApiErrorCode.ERR_INVALID_QR_TOKEN,
       qrResult.message || "Invalid QR token."
     );
@@ -138,25 +141,60 @@ export async function scanAttendance(
 
   const now = params.simulatedNow || new Date();
 
-  // 3. Per-employee replay protection: atomic insert into QrChallenge
-  try {
-    await QrChallenge.create({
-      employee: employee._id,
-      employeeId: employee.employeeId,
-      qrNonce: tokenString,
-      terminalId: qrResult.terminalId || "UNKNOWN",
-      redeemedAt: now,
-    });
-  } catch (err: unknown) {
-    const mongoErr = err as { code?: number };
-    if (mongoErr.code === 11000) {
-      throw new AppError(
-        409,
-        ApiErrorCode.ERR_QR_REPLAY_DETECTED,
-        "You have already scanned this specific QR code token."
+  const qrReservationId = qrResult.display ? crypto.randomUUID() : null;
+  const qrLedgerToken = qrResult.tokenRecord?.token || tokenString;
+  let attendancePersisted = false;
+
+  // QR redemption happens immediately before a successful database write. This allows
+  // the same current QR to be confirmed after the early-checkout reason prompt.
+  const redeemQrToken = async () => {
+    if (qrReservationId && qrResult.display) {
+      const reserved = await qrService.reserveQrToken(qrLedgerToken, qrReservationId, {
+        displayId: qrResult.display.terminalId,
+        terminalId: qrResult.display.terminalId,
+        tokenEpoch: qrResult.tokenRecord?.tokenEpoch ?? qrResult.display.tokenEpoch,
+        issuedAt: qrResult.tokenRecord?.issuedAt ?? qrResult.tokenIssuedAt ?? now,
+        expiresAt: qrResult.tokenRecord?.expiresAt ?? qrResult.tokenExpiresAt ?? now,
+      });
+      if (!reserved) {
+        throw new AppError(409, ApiErrorCode.ERR_QR_REPLAY_DETECTED,
+          "This QR code has already been used.");
+      }
+    }
+    try {
+      await QrChallenge.create({ employee: employee._id, employeeId: employee.employeeId,
+        qrNonce: tokenString, terminalId: qrResult.terminalId || "UNKNOWN", redeemedAt: now });
+    } catch (err: unknown) {
+      if (qrReservationId) {
+        await qrService.releaseQrTokenReservation(qrLedgerToken, qrReservationId);
+      }
+      if ((err as { code?: number }).code === 11000) {
+        throw new AppError(409, ApiErrorCode.ERR_QR_REPLAY_DETECTED,
+          "You have already scanned this specific QR code token.");
+      }
+      throw err;
+    }
+  };
+  const releasePendingRedemption = async () => {
+    if (attendancePersisted) return;
+    if (qrReservationId) {
+      await qrService.releaseQrTokenReservation(qrLedgerToken, qrReservationId);
+    }
+    await QrChallenge.deleteOne({ employee: employee._id, qrNonce: tokenString });
+  };
+  const finalizeRedemption = async () => {
+    attendancePersisted = true;
+    if (qrReservationId) {
+      await qrService.consumeQrToken(
+        qrLedgerToken,
+        qrReservationId,
+        qrResult.terminalId || "UNKNOWN"
       );
     }
-    throw err;
+  };
+  if (await QrChallenge.exists({ employee: employee._id, qrNonce: tokenString })) {
+    throw new AppError(409, ApiErrorCode.ERR_QR_REPLAY_DETECTED,
+      "You have already scanned this specific QR code token.");
   }
 
   // 4. Timezone & dateKey derivation from active policy
@@ -170,7 +208,7 @@ export async function scanAttendance(
   if (employee.shiftId) {
     const shiftIdStr = employee.shiftId.toString();
     const matchedShift = policy.shifts.find(
-      (s) => s._id.toString() === shiftIdStr || s.name === shiftIdStr
+      (s) => s.isActive && (s._id.toString() === shiftIdStr || s.name === shiftIdStr)
     );
     if (matchedShift) {
       shift = {
@@ -182,36 +220,12 @@ export async function scanAttendance(
       };
     }
   }
-  if (!shift && policy.shifts.length > 0) {
-    // If night shift exists and current hour is >= 20:00 or <= 07:00, pick overnight shift
-    const localHour = parseInt(
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: timezone,
-        hour: "numeric",
-        hour12: false,
-      }).format(now),
-      10
-    );
-
-    const nightShift = policy.shifts.find((s) => s.isOvernight);
-    const chosen = nightShift && (localHour >= 20 || localHour < 8) ? nightShift : policy.shifts[0];
-    shift = {
-      name: chosen.name,
-      startTime: chosen.startTime,
-      endTime: chosen.endTime,
-      graceMinutes: chosen.graceMinutes,
-      isOvernight: chosen.isOvernight,
-    };
+  const assignedShift = shift;
+  if (!assignedShift) {
+    throw new AppError(409, ApiErrorCode.ERR_SHIFT_NOT_ASSIGNED,
+      "A valid assigned shift is required to record attendance. Please contact HR.");
   }
-
-  // Fallback default shift
-  const defaultShift: ShiftDefinition = shift || {
-    name: "General Day Shift",
-    startTime: "09:00",
-    endTime: "18:00",
-    isOvernight: false,
-    graceMinutes: policy.defaultGraceMinutes || 15,
-  };
+  const defaultShift: ShiftDefinition = assignedShift;
 
   // 5. Cross-Midnight Overnight Shift Matching:
   // Check if there is an open check-in session from yesterday (for overnight shifts)
@@ -249,6 +263,25 @@ export async function scanAttendance(
         );
       }
 
+      const snapshotEnd = recordToProcess.scheduledShiftEndTime;
+      const shiftEnd = snapshotEnd || (assignedShift
+        ? getShiftWindow(assignedShift, effectiveDateKey, timezone).shiftEndUtc
+        : null);
+      if (!shiftEnd || Number.isNaN(shiftEnd.getTime())) {
+        throw new AppError(409, ApiErrorCode.ERR_SHIFT_NOT_ASSIGNED,
+          "A valid assigned shift is required before checking out. Please contact HR.");
+      }
+      const isEarlyCheckout = now.getTime() < shiftEnd.getTime();
+      const earlyCheckoutReason = (params.earlyCheckoutReason || "")
+        .replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
+      if (isEarlyCheckout && !earlyCheckoutReason) {
+        throw new AppError(428, ApiErrorCode.ERR_EARLY_CHECKOUT_REASON_REQUIRED,
+          "You are checking out before your scheduled shift ends. Please provide a reason for early checkout.",
+          { employeeName: employee.name, employeeId: employee.employeeId,
+            shiftName: recordToProcess.shiftName || assignedShift?.name || null,
+            scheduledShiftEndTime: shiftEnd.toISOString(), currentCheckoutTime: now.toISOString() });
+      }
+
       // Calculate work duration
       const durationMinutes = Math.max(
         0,
@@ -269,29 +302,49 @@ export async function scanAttendance(
         finalStatus = AttendanceStatus.CHECKED_OUT;
       }
 
+      await redeemQrToken();
       // Concurrency guard: atomic update conditioned on checkOutTime remaining null
-      const updatedRecord = await AttendanceRecord.findOneAndUpdate(
-        {
-          _id: recordToProcess._id,
-          checkOutTime: null,
-        },
-        {
-          $set: {
-            checkOutTime: now,
-            durationMinutes,
-            status: finalStatus,
+      let updatedRecord: IAttendanceRecord | null;
+      try {
+        updatedRecord = await AttendanceRecord.findOneAndUpdate(
+          {
+            _id: recordToProcess._id,
+            checkOutTime: null,
           },
-        },
-        { new: true }
-      );
+          {
+            $set: {
+              checkOutTime: now,
+              durationMinutes,
+              status: finalStatus,
+              isEarlyCheckout,
+              earlyCheckoutReason: isEarlyCheckout ? earlyCheckoutReason : null,
+              scheduledShiftEndTime: shiftEnd,
+              shiftName: recordToProcess.shiftName || assignedShift?.name || null,
+            },
+          },
+          { new: true }
+        );
+      } catch (error) {
+        await releasePendingRedemption();
+        throw error;
+      }
 
       if (!updatedRecord) {
+        await releasePendingRedemption();
         throw new AppError(
           409,
           ApiErrorCode.ERR_ALREADY_CHECKED_IN,
           "You have already checked out for today. Attendance session closed."
         );
       }
+
+      await finalizeRedemption();
+
+      await AuditEvent.create({ entityType: "ATTENDANCE_RECORD", entityId: updatedRecord._id.toString(),
+        performedBy: employee.userId || undefined, performedByEmployeeId: employee.employeeId,
+        action: "QR_CHECK_OUT", timestamp: now, reason: isEarlyCheckout ? earlyCheckoutReason : undefined,
+        metadata: { punchType: "CHECK_OUT", isEarlyCheckout, scheduledShiftEndTime: shiftEnd,
+          checkOutTime: now, terminalId: qrResult.terminalId || "UNKNOWN" } });
 
       eventEmitterService.emitAttendanceUpdated({
         recordId: updatedRecord._id.toString(),
@@ -308,7 +361,16 @@ export async function scanAttendance(
         checkInTime: updatedRecord.checkInTime ? updatedRecord.checkInTime.toISOString() : null,
         checkOutTime: now.toISOString(),
         durationMinutes,
-        message: `Check-out successful. Total duration: ${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m.`,
+      message: `Check-out successful. Total duration: ${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m.`,
+      });
+      eventEmitterService.emitAttendanceDisplayConfirmation({
+        recordId: updatedRecord._id.toString(),
+        terminalId: qrResult.terminalId || "UNKNOWN",
+        employeeName: employee.name,
+        employeeId: employee.employeeId,
+        punchType: "CHECK_OUT",
+        timestamp: updatedRecord.checkOutTime?.toISOString() || now.toISOString(),
+        timeZone: timezone,
       });
 
       return {
@@ -346,7 +408,7 @@ export async function scanAttendance(
       throw new AppError(
         400,
         ApiErrorCode.ERR_ATTENDANCE_WINDOW_CLOSED,
-        "The attendance window for this date has closed. Please contact HR for a manual correction."
+        "The attendance window for this date has closed. Please contact HR to verify your attendance status."
       );
     }
   }
@@ -366,6 +428,8 @@ export async function scanAttendance(
 
   // Concurrency-safe atomic insert/upsert guarded by unique compound index { employee: 1, dateKey: 1 }
   try {
+    await redeemQrToken();
+    const shiftWindow = assignedShift ? getShiftWindow(assignedShift, effectiveDateKey, timezone) : null;
     const upsertResult = await AttendanceRecord.findOneAndUpdate(
       { employee: employee._id, dateKey: effectiveDateKey },
       {
@@ -386,6 +450,11 @@ export async function scanAttendance(
           policyId: policy._id,
           policyVersion: policy.version,
           terminalId: qrResult.terminalId,
+          shiftId: employee.shiftId || null,
+          shiftName: assignedShift?.name || null,
+          scheduledShiftEndTime: shiftWindow?.shiftEndUtc || null,
+          isEarlyCheckout: false,
+          earlyCheckoutReason: null,
         },
       },
       { upsert: true, new: true, rawResult: true }
@@ -398,6 +467,7 @@ export async function scanAttendance(
       .lastErrorObject?.updatedExisting;
 
     if (updatedExisting) {
+      await releasePendingRedemption();
       // A concurrent request won the race and created the check-in first
       throw new AppError(
         409,
@@ -405,6 +475,8 @@ export async function scanAttendance(
         "Employee is already checked in for today."
       );
     }
+
+    await finalizeRedemption();
 
     eventEmitterService.emitAttendanceUpdated({
       recordId: createdRecord._id.toString(),
@@ -425,6 +497,19 @@ export async function scanAttendance(
         ? `Check-in recorded (Late by ${lateEvaluation.lateMinutes} minutes).`
         : "Check-in successful. Welcome to VorldX!",
     });
+    eventEmitterService.emitAttendanceDisplayConfirmation({
+      recordId: createdRecord._id.toString(),
+      terminalId: qrResult.terminalId || "UNKNOWN",
+      employeeName: employee.name,
+      employeeId: employee.employeeId,
+      punchType: "CHECK_IN",
+      timestamp: createdRecord.checkInTime?.toISOString() || now.toISOString(),
+      timeZone: timezone,
+    });
+    await AuditEvent.create({ entityType: "ATTENDANCE_RECORD", entityId: createdRecord._id.toString(),
+      performedBy: employee.userId || undefined, performedByEmployeeId: employee.employeeId,
+      action: "QR_CHECK_IN", timestamp: now,
+      metadata: { punchType: "CHECK_IN", checkInTime: now, terminalId: qrResult.terminalId || "UNKNOWN" } });
 
     return {
       success: true,
@@ -439,6 +524,7 @@ export async function scanAttendance(
         : "Check-in successful. Welcome to VorldX!",
     };
   } catch (err: unknown) {
+    await releasePendingRedemption();
     const mongoErr = err as { code?: number };
     if (mongoErr.code === 11000) {
       throw new AppError(
@@ -613,6 +699,7 @@ export async function listAttendanceRecords(query: AttendanceFilterQuery) {
   const skip = (page - 1) * limit;
 
   const filter: Record<string, unknown> = {};
+  const andFilters: Record<string, unknown>[] = [];
 
   // Date range filtering
   const startDate = query.startDate || query.from;
@@ -642,7 +729,9 @@ export async function listAttendanceRecords(query: AttendanceFilterQuery) {
   const empTarget = query.employeeId || query.employee;
   if (empTarget) {
     if (Types.ObjectId.isValid(empTarget)) {
-      filter.$or = [{ employee: new Types.ObjectId(empTarget) }, { employeeId: empTarget }];
+      andFilters.push({
+        $or: [{ employee: new Types.ObjectId(empTarget) }, { employeeId: empTarget }],
+      });
     } else {
       filter.employeeId = empTarget.trim().toUpperCase();
     }
@@ -654,7 +743,7 @@ export async function listAttendanceRecords(query: AttendanceFilterQuery) {
       "_id"
     );
     const empIds = matchingWorkTypeEmployees.map((e) => e._id);
-    filter.employee = { $in: empIds };
+    andFilters.push({ employee: { $in: empIds } });
   }
 
   // Search filter (name, employeeId, department)
@@ -665,12 +754,16 @@ export async function listAttendanceRecords(query: AttendanceFilterQuery) {
     }).select("_id");
     const empIds = matchingEmployees.map((e) => e._id);
 
-    filter.$or = [
-      { employee: { $in: empIds } },
-      { employeeId: searchRegex },
-      { department: searchRegex },
-    ];
+    andFilters.push({
+      $or: [
+        { employee: { $in: empIds } },
+        { employeeId: searchRegex },
+        { department: searchRegex },
+      ],
+    });
   }
+
+  if (andFilters.length) filter.$and = andFilters;
 
   const sortField = query.sortBy || "dateKey";
   const sortOrder = query.sortOrder === "asc" ? 1 : -1;
@@ -701,71 +794,81 @@ export async function listAttendanceRecords(query: AttendanceFilterQuery) {
   };
 }
 
-/**
- * HR/Admin: Administrative correction of an attendance record
- * - Mandatory justification reason (min 5 chars)
- * - Validates checkOutTime > checkInTime
- * - Preserves original pre-correction values in originalValues & corrections history array
- * - Recomputes duration, late flag, and state machine status
- * - Records an immutable AuditEvent
- */
+/** ADMIN-only attendance correction. The effective ledger row is updated while every
+ * correction is also appended to the record history and a separate audit event. */
 export async function correctAttendanceRecord(
   recordId: string,
   data: AttendanceCorrectionRequest,
   actor: { userId: string; employeeId?: string; role?: string }
 ) {
+  if (actor.role?.toUpperCase() !== "ADMIN") {
+    throw AppError.forbidden("Only administrators may correct attendance records.", ApiErrorCode.ERR_FORBIDDEN);
+  }
   if (!Types.ObjectId.isValid(recordId)) {
     throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "Invalid attendance record ID format.");
   }
-
-  if (!data.reason || data.reason.trim().length < 5) {
-    throw new AppError(
-      400,
-      ApiErrorCode.ERR_CORRECTION_REASON_REQUIRED,
-      "A justification reason of at least 5 characters is required for administrative corrections."
-    );
+  const reason = data.reason?.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+  if (!reason || reason.length < 5) {
+    throw new AppError(400, ApiErrorCode.ERR_CORRECTION_REASON_REQUIRED,
+      "A correction reason of at least 5 characters is required.");
   }
 
   const record = await AttendanceRecord.findById(recordId);
-  if (!record) {
-    throw new AppError(404, ApiErrorCode.ERR_NOT_FOUND, "Attendance record not found.");
+  if (!record) throw new AppError(404, ApiErrorCode.ERR_NOT_FOUND, "Attendance record not found.");
+  if ([AttendanceStatus.WFH_PENDING, AttendanceStatus.WFH_APPROVED, AttendanceStatus.WFH_REJECTED,
+      AttendanceStatus.ON_LEAVE, AttendanceStatus.WEEKEND, AttendanceStatus.HOLIDAY].includes(record.status)) {
+    throw new AppError(409, ApiErrorCode.ERR_BAD_REQUEST,
+      "WFH, leave, weekend, and holiday attendance is managed by its source workflow and cannot be corrected here.");
   }
 
-  const finalCheckIn =
-    data.checkInTime !== undefined
-      ? data.checkInTime
-        ? new Date(data.checkInTime)
-        : null
-      : record.checkInTime;
+  const finalCheckIn = data.checkInTime === undefined
+    ? record.checkInTime
+    : data.checkInTime === null ? null : new Date(data.checkInTime);
+  const finalCheckOut = data.checkOutTime === undefined
+    ? record.checkOutTime
+    : data.checkOutTime === null ? null : new Date(data.checkOutTime);
+  if ((finalCheckIn && !Number.isFinite(finalCheckIn.getTime())) ||
+      (finalCheckOut && !Number.isFinite(finalCheckOut.getTime()))) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "Correction timestamps must be valid dates.");
+  }
+  if (finalCheckOut && !finalCheckIn) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "A check-in time is required when a check-out time is set.");
+  }
+  if (finalCheckIn && finalCheckOut && finalCheckOut.getTime() <= finalCheckIn.getTime()) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "Check-out time must be strictly after check-in time.");
+  }
 
-  const finalCheckOut =
-    data.checkOutTime !== undefined
-      ? data.checkOutTime
-        ? new Date(data.checkOutTime)
-        : null
-      : record.checkOutTime;
-
-  // Validate checkOut is strictly after checkIn
-  if (finalCheckIn && finalCheckOut) {
-    if (finalCheckOut.getTime() <= finalCheckIn.getTime()) {
-      throw new AppError(
-        400,
-        ApiErrorCode.ERR_BAD_REQUEST,
-        "Check-out time must be strictly after check-in time."
-      );
+  const policy = await policyService.getActivePolicy();
+  const timezone = policy.timezone || "Asia/Kolkata";
+  if (finalCheckIn && getDateKey(finalCheckIn, timezone) !== record.dateKey) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "Check-in must fall on the attendance record date.");
+  }
+  if (finalCheckOut) {
+    const checkoutKey = getDateKey(finalCheckOut, timezone);
+    if (checkoutKey !== record.dateKey && checkoutKey !== addDaysToDateKey(record.dateKey, 1)) {
+      throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "Check-out must fall on the attendance date or its following day.");
     }
   }
 
-  // Preserve original pre-correction values on the first correction
-  if (!record.originalValues) {
-    record.originalValues = {
-      checkInTime: record.checkInTime,
-      checkOutTime: record.checkOutTime,
-      status: record.status,
-      durationMinutes: record.durationMinutes,
-      isLate: record.isLate,
-      lateMinutes: record.lateMinutes,
-    };
+  const durationMinutes = finalCheckIn && finalCheckOut
+    ? Math.round((finalCheckOut.getTime() - finalCheckIn.getTime()) / 60000)
+    : 0;
+  if (durationMinutes > 24 * 60) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "Attendance duration cannot exceed 24 hours.");
+  }
+  if (!finalCheckIn && data.status !== undefined && data.status !== AttendanceStatus.ABSENT) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "A record without punches can only be corrected to ABSENT.");
+  }
+  if (finalCheckIn && !finalCheckOut && data.status &&
+      ![AttendanceStatus.PRESENT, AttendanceStatus.LATE, AttendanceStatus.INCOMPLETE].includes(data.status)) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "The selected status is incompatible with a missing check-out.");
+  }
+  if (finalCheckIn && finalCheckOut && data.status &&
+      ![AttendanceStatus.CHECKED_OUT, AttendanceStatus.HALF_DAY, AttendanceStatus.INCOMPLETE].includes(data.status)) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "The selected status is incompatible with completed punches.");
+  }
+  if (data.status === AttendanceStatus.ABSENT && (finalCheckIn || finalCheckOut)) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST, "ABSENT status cannot include punch timestamps.");
   }
 
   const previousSnapshot = {
@@ -777,117 +880,81 @@ export async function correctAttendanceRecord(
     lateMinutes: record.lateMinutes,
     isMissingCheckout: record.isMissingCheckout,
   };
-
-  // Recompute duration
-  let durationMinutes = 0;
-  if (finalCheckIn && finalCheckOut) {
-    durationMinutes = Math.round((finalCheckOut.getTime() - finalCheckIn.getTime()) / (1000 * 60));
-  } else if (
-    data.status === AttendanceStatus.WFH_APPROVED ||
-    record.status === AttendanceStatus.WFH_APPROVED
-  ) {
-    durationMinutes = 480;
+  const employee = await Employee.findById(record.employee);
+  const shift = (employee?.shiftId ? policy.shifts.id(employee.shiftId) : null) ||
+    policy.shifts.find((item) => item.isActive) || policy.shifts[0];
+  const lateResult = finalCheckIn && shift
+    ? isLate(finalCheckIn, shift as unknown as ShiftDefinition, record.dateKey, timezone)
+    : { isLate: false, lateMinutes: 0 };
+  const minFullDay = (policy.minFullDayHours || 8) * 60;
+  const minHalfDay = (policy.minHalfDayHours || 4) * 60;
+  let status = data.status;
+  if (!status) {
+    if (!finalCheckIn) status = AttendanceStatus.ABSENT;
+    else if (!finalCheckOut) status = lateResult.isLate ? AttendanceStatus.LATE : AttendanceStatus.PRESENT;
+    else if (durationMinutes >= minFullDay) status = AttendanceStatus.CHECKED_OUT;
+    else if (durationMinutes >= minHalfDay) status = AttendanceStatus.HALF_DAY;
+    else status = AttendanceStatus.INCOMPLETE;
   }
-
-  // Recompute late
-  const policy = await policyService.getActivePolicy();
-  const timezone = policy.timezone || "Asia/Kolkata";
-  let isLateVal = false;
-  let lateMinutesVal = 0;
-
-  if (data.isLate !== undefined) {
-    isLateVal = data.isLate;
-  } else if (finalCheckIn) {
-    const employee = await Employee.findById(record.employee);
-    const shift =
-      (employee?.shiftId ? policy.shifts.id(employee.shiftId) : null) ||
-      policy.shifts.find((s) => s.isActive) ||
-      policy.shifts[0];
-    if (shift) {
-      const lateResult = isLate(
-        finalCheckIn,
-        shift as unknown as ShiftDefinition,
-        record.dateKey,
-        timezone
-      );
-      isLateVal = lateResult.isLate;
-      lateMinutesVal = lateResult.lateMinutes;
-    }
+  if (finalCheckIn && !finalCheckOut &&
+      ((status === AttendanceStatus.LATE && !lateResult.isLate) ||
+       (status === AttendanceStatus.PRESENT && lateResult.isLate))) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST,
+      "PRESENT/LATE status must agree with the recorded check-in time and shift policy.");
   }
-
-  // Recompute status
-  let finalStatus = record.status;
-  if (data.status !== undefined) {
-    finalStatus = data.status;
-  } else {
-    if (!finalCheckIn && !finalCheckOut) {
-      finalStatus =
-        record.isWfh || record.status === AttendanceStatus.WFH_APPROVED
-          ? AttendanceStatus.WFH_APPROVED
-          : AttendanceStatus.ABSENT;
-    } else if (finalCheckIn && finalCheckOut) {
-      const minFullDay = (policy.minFullDayHours || 8) * 60;
-      const minHalfDay = (policy.minHalfDayHours || 4) * 60;
-      if (durationMinutes >= minFullDay) {
-        finalStatus = AttendanceStatus.CHECKED_OUT;
-      } else if (durationMinutes >= minHalfDay) {
-        finalStatus = AttendanceStatus.HALF_DAY;
-      } else {
-        finalStatus = AttendanceStatus.INCOMPLETE;
-      }
-    } else if (finalCheckIn && !finalCheckOut) {
-      if (data.isMissingCheckout) {
-        finalStatus = AttendanceStatus.INCOMPLETE;
-      } else {
-        finalStatus = isLateVal ? AttendanceStatus.LATE : AttendanceStatus.PRESENT;
-      }
-    }
+  if (finalCheckIn && finalCheckOut &&
+      ((status === AttendanceStatus.CHECKED_OUT && durationMinutes < minFullDay) ||
+       (status === AttendanceStatus.HALF_DAY && (durationMinutes < minHalfDay || durationMinutes >= minFullDay)) ||
+       (status === AttendanceStatus.INCOMPLETE && durationMinutes >= minHalfDay))) {
+    throw new AppError(400, ApiErrorCode.ERR_BAD_REQUEST,
+      "The selected status is incompatible with the corrected attendance duration.");
   }
-
-  const isMissingCheckoutVal =
-    data.isMissingCheckout !== undefined
-      ? data.isMissingCheckout
-      : finalCheckIn && !finalCheckOut
-        ? true
-        : false;
-
+  const isMissingCheckout = Boolean(finalCheckIn && !finalCheckOut);
   const now = new Date();
   const adminUserId = new Types.ObjectId(actor.userId);
-
+  const newValues = {
+    checkInTime: finalCheckIn,
+    checkOutTime: finalCheckOut,
+    status,
+    durationMinutes,
+    isLate: lateResult.isLate,
+    lateMinutes: lateResult.lateMinutes,
+    isMissingCheckout,
+  };
   const correctionEntry: ICorrectionHistoryEntry = {
-    correctionReason: data.reason.trim(),
+    correctionReason: reason,
     correctedBy: adminUserId,
     correctedAt: now,
     previousValues: previousSnapshot,
-    newValues: {
-      checkInTime: finalCheckIn,
-      checkOutTime: finalCheckOut,
-      status: finalStatus,
-      durationMinutes,
-      isLate: isLateVal,
-      lateMinutes: lateMinutesVal,
-      isMissingCheckout: isMissingCheckoutVal,
-    },
+    newValues,
   };
 
+  if (!record.originalValues) {
+    record.originalValues = {
+      checkInTime: record.checkInTime,
+      checkOutTime: record.checkOutTime,
+      status: record.status,
+      durationMinutes: record.durationMinutes,
+      isLate: record.isLate,
+      lateMinutes: record.lateMinutes,
+    };
+  }
   record.corrections = record.corrections || [];
   record.corrections.push(correctionEntry);
-
   record.checkInTime = finalCheckIn;
   record.checkOutTime = finalCheckOut;
   record.durationMinutes = durationMinutes;
-  record.status = finalStatus;
-  record.isLate = isLateVal;
-  record.lateMinutes = lateMinutesVal;
-  record.isMissingCheckout = isMissingCheckoutVal;
+  record.status = status;
+  record.isLate = lateResult.isLate;
+  record.lateMinutes = lateResult.lateMinutes;
+  record.isMissingCheckout = isMissingCheckout;
   record.isManuallyCorrected = true;
-  record.correctionReason = data.reason.trim();
+  record.correctionReason = reason;
   record.correctedBy = adminUserId;
   record.correctedAt = now;
-
+  // Preserve QR checkout metadata and the original early-checkout reason verbatim.
   await record.save();
 
-  // Write immutable AuditEvent
   await AuditEvent.create({
     entityType: "ATTENDANCE_RECORD",
     entityId: record._id.toString(),
@@ -895,43 +962,23 @@ export async function correctAttendanceRecord(
     performedByEmployeeId: actor.employeeId || "ADMIN",
     action: "CORRECTION",
     previousValue: previousSnapshot,
-    newValue: correctionEntry.newValues,
-    reason: data.reason.trim(),
+    newValue: newValues,
+    reason,
     timestamp: now,
-    metadata: { actorRole: actor.role || "HR" },
+    metadata: { actorRole: "ADMIN", attendanceRecordId: record._id.toString(), employeeId: record.employeeId },
   });
 
   eventEmitterService.emitAttendanceUpdated({
-    recordId: record._id.toString(),
-    employeeId: record.employeeId,
-    dateKey: record.dateKey,
-    punchType: "CORRECTION",
-    status: record.status,
-    isLate: record.isLate,
-    lateMinutes: record.lateMinutes,
-    timestamp: now.toISOString(),
-    checkInTime: record.checkInTime ? record.checkInTime.toISOString() : null,
-    checkOutTime: record.checkOutTime ? record.checkOutTime.toISOString() : null,
-    durationMinutes: record.durationMinutes,
-    message: "Attendance record successfully corrected by HR.",
+    recordId: record._id.toString(), employeeId: record.employeeId, dateKey: record.dateKey,
+    punchType: "CORRECTION", status: record.status, isLate: record.isLate,
+    lateMinutes: record.lateMinutes, timestamp: now.toISOString(),
+    checkInTime: record.checkInTime?.toISOString() || null,
+    checkOutTime: record.checkOutTime?.toISOString() || null,
+    durationMinutes: record.durationMinutes, message: "Attendance record successfully corrected by Admin.",
   });
-
-  return {
-    success: true,
-    message: "Attendance record successfully corrected.",
-    record,
-  };
+  return { success: true, message: "Attendance record successfully corrected.", record };
 }
 
-/**
- * Scheduled job & manual demo trigger:
- * Evaluates absentees and incomplete check-outs for a target dateKey:
- * 1. Never marks absent before the policy cutoff time for today (unless force=true)
- * 2. Excludes non-working days (weekends) and official holidays
- * 3. Excludes employees with approved WFH or existing attendance records
- * 4. Marks employees who checked in without checkout as "INCOMPLETE"
- * 5. Strictly idempotent: running multiple times yields the exact same state without duplicate records
- */
 export async function evaluateAbsenceAndIncompleteJob(
   targetDateKey?: string,
   options?: {

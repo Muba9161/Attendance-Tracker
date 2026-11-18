@@ -1,9 +1,17 @@
 import crypto from "crypto";
-import { QrDisplay, IQrDisplay, QrToken, IQrToken, AuditEvent } from "../models";
+import {
+  QrDisplay,
+  IQrDisplay,
+  QrToken,
+  IQrToken,
+  AuditEvent,
+  AttendancePolicy,
+} from "../models";
 import { AppError } from "../utils/AppError";
 import { eventEmitterService } from "./eventEmitter.service";
 import { ApiErrorCode, TerminalStatus } from "@vorldx/shared";
 import { env } from "../config/env";
+import { logger } from "../utils/logger";
 
 export interface QrValidationResult {
   isValid: boolean;
@@ -13,6 +21,8 @@ export interface QrValidationResult {
   terminalId?: string;
   display?: IQrDisplay;
   tokenRecord?: IQrToken;
+  tokenIssuedAt?: Date;
+  tokenExpiresAt?: Date;
 }
 
 export interface DisplayResponse {
@@ -123,7 +133,7 @@ export async function registerDisplay(
  * Lists all registered displays with status and lastSeen timestamps
  */
 export async function listDisplays(): Promise<DisplayResponse[]> {
-  const displays = await QrDisplay.find().sort({ createdAt: -1 });
+  const displays = await QrDisplay.find({ archivedAt: null }).sort({ createdAt: -1 });
   return displays.map(sanitizeDisplay);
 }
 
@@ -136,7 +146,7 @@ export async function getDisplayById(idOrTerminalId: string): Promise<DisplayRes
     : { terminalId: idOrTerminalId };
 
   const display = await QrDisplay.findOne(query);
-  if (!display) {
+  if (!display || display.archivedAt) {
     throw new AppError(404, ApiErrorCode.ERR_DISPLAY_NOT_FOUND, "Display terminal not found.");
   }
 
@@ -160,6 +170,7 @@ export async function pairDisplay(pairingCode: string): Promise<{
   const display = await QrDisplay.findOne({
     pairingCode: normalizedCode,
     isPaired: false,
+    archivedAt: null,
     pairingCodeExpiresAt: { $gt: new Date() },
   });
 
@@ -240,7 +251,7 @@ export async function authorizeDisplay(
     : { terminalId: idOrTerminalId };
 
   const display = await QrDisplay.findOne(query);
-  if (!display) {
+  if (!display || display.archivedAt) {
     throw new AppError(404, ApiErrorCode.ERR_DISPLAY_NOT_FOUND, "Display terminal not found.");
   }
 
@@ -294,7 +305,7 @@ export async function updateDisplayStatus(
     : { terminalId: idOrTerminalId };
 
   const display = await QrDisplay.findOne(query);
-  if (!display) {
+  if (!display || display.archivedAt) {
     throw new AppError(404, ApiErrorCode.ERR_DISPLAY_NOT_FOUND, "Display terminal not found.");
   }
 
@@ -359,7 +370,7 @@ export async function revokeDisplay(
     : { terminalId: idOrTerminalId };
 
   const display = await QrDisplay.findOne(query);
-  if (!display) {
+  if (!display || display.archivedAt) {
     throw new AppError(404, ApiErrorCode.ERR_DISPLAY_NOT_FOUND, "Display terminal not found.");
   }
 
@@ -403,6 +414,64 @@ export async function revokeDisplay(
 }
 
 /**
+ * Soft archives one terminal, retaining its document and historical records.
+ * Credentials and this terminal's tokens are invalidated so an archived kiosk
+ * cannot continue operating after it leaves active management.
+ */
+export async function archiveDisplay(
+  idOrTerminalId: string,
+  reason?: string,
+  actor?: { id: string; employeeId?: string; role?: string }
+): Promise<DisplayResponse> {
+  const query = idOrTerminalId.match(/^[0-9a-fA-F]{24}$/)
+    ? { _id: idOrTerminalId }
+    : { terminalId: idOrTerminalId };
+  const display = await QrDisplay.findOne({ ...query, archivedAt: null });
+  if (!display) {
+    throw new AppError(404, ApiErrorCode.ERR_DISPLAY_NOT_FOUND, "Display terminal not found.");
+  }
+
+  const previousState = display.toObject();
+  display.archivedAt = new Date();
+  display.isActive = false;
+  display.status = TerminalStatus.REVOKED;
+  display.isPaired = false;
+  display.pairingCode = undefined;
+  display.pairingCodeExpiresAt = undefined;
+  display.displayCredentialHash = undefined;
+  display.terminalSecret = undefined;
+  display.tokenEpoch = (display.tokenEpoch || 1) + 1;
+  await display.save();
+
+  await QrToken.updateMany({ displayId: display.terminalId }, { $set: { isRevoked: true } });
+
+  if (actor) {
+    await AuditEvent.create({
+      performedBy: actor.id,
+      performedByEmployeeId: actor.employeeId || "ADMIN",
+      action: "DELETE",
+      entityType: "TERMINAL",
+      entityId: display._id,
+      previousValue: previousState,
+      newValue: display.toObject(),
+      reason: reason || "Display terminal archived",
+      metadata: { action: "ARCHIVE", terminalId: display.terminalId, actorRole: actor.role || "ADMIN" },
+    });
+  }
+
+  eventEmitterService.emitDisplayStatus({
+    terminalId: display.terminalId,
+    displayId: display.terminalId,
+    name: display.name,
+    isActive: false,
+    status: display.status,
+    message: "Display terminal archived by administrator.",
+  });
+
+  return sanitizeDisplay(display);
+}
+
+/**
  * Validates display authentication credentials from headers
  */
 export async function authenticateDisplay(
@@ -418,7 +487,7 @@ export async function authenticateDisplay(
   }
 
   const display = await QrDisplay.findOne({ terminalId: displayId });
-  if (!display) {
+  if (!display || display.archivedAt) {
     throw new AppError(401, ApiErrorCode.ERR_TERMINAL_UNAUTHORIZED, "Invalid display credentials.");
   }
 
@@ -480,12 +549,37 @@ export async function requestRotatingChallenge(
   terminalId: string;
   issuedAt: string;
   expiresAt: string;
+  rotationSeconds: number;
   ttlSeconds: number;
   serverTime: number;
 }> {
   const display = await authenticateDisplay(displayId, credential);
 
-  const ttlSeconds = customTtlSeconds || env.QR_ROTATION_SECONDS + env.QR_GRACE_SECONDS; // 30 + 15 = 45s
+  return issueRotatingChallenge(display, customTtlSeconds);
+}
+
+async function issueRotatingChallenge(
+  display: IQrDisplay,
+  customTtlSeconds?: number
+): Promise<{
+  success: boolean;
+  token: string;
+  qrPayload: string;
+  displayId: string;
+  terminalId: string;
+  issuedAt: string;
+  expiresAt: string;
+  rotationSeconds: number;
+  ttlSeconds: number;
+  serverTime: number;
+}> {
+
+  const policy = await AttendancePolicy.findOne({ isDefault: true }).select(
+    "qrRotationSeconds qrGraceSeconds"
+  );
+  const rotationSeconds = policy?.qrRotationSeconds ?? env.QR_ROTATION_SECONDS;
+  const graceSeconds = policy?.qrGraceSeconds ?? env.QR_GRACE_SECONDS;
+  const ttlSeconds = customTtlSeconds || rotationSeconds + graceSeconds;
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + ttlSeconds * 1000);
 
@@ -521,9 +615,74 @@ export async function requestRotatingChallenge(
     terminalId: display.terminalId,
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
+    rotationSeconds,
     ttlSeconds,
     serverTime: issuedAt.getTime(),
   };
+}
+
+/** Atomically reserve one opaque QR token while its attendance write is in progress. */
+export async function reserveQrToken(
+  token: string,
+  reservationId: string,
+  metadata?: { displayId: string; terminalId: string; tokenEpoch: number; issuedAt: Date; expiresAt: Date }
+): Promise<boolean> {
+  const result = await QrToken.updateOne(
+    { token, isRevoked: false, consumedAt: null, reservationId: null, expiresAt: { $gt: new Date() } },
+    { $set: { reservationId } }
+  );
+  if (result.modifiedCount === 1) return true;
+  if (await QrToken.exists({ token }) || !metadata) return false;
+  if (metadata.expiresAt.getTime() <= Date.now()) return false;
+
+  try {
+    await QrToken.create({
+      token,
+      displayId: metadata.displayId,
+      terminalId: metadata.terminalId,
+      tokenEpoch: metadata.tokenEpoch,
+      issuedAt: metadata.issuedAt,
+      expiresAt: metadata.expiresAt,
+      isRevoked: false,
+      reservationId,
+    });
+    return true;
+  } catch (error) {
+    if ((error as { code?: number }).code === 11000) return false;
+    throw error;
+  }
+}
+
+export async function releaseQrTokenReservation(token: string, reservationId: string): Promise<void> {
+  await QrToken.updateOne(
+    { token, reservationId, consumedAt: null },
+    { $set: { reservationId: null } }
+  );
+}
+
+/** Mark the reserved QR consumed only after attendance persistence, then issue its successor. */
+export async function consumeQrToken(
+  token: string,
+  reservationId: string,
+  displayId: string
+): Promise<void> {
+  const result = await QrToken.updateOne(
+    { token, reservationId, consumedAt: null },
+    { $set: { consumedAt: new Date(), reservationId: null } }
+  );
+  if (result.modifiedCount !== 1) {
+    throw new AppError(409, ApiErrorCode.ERR_QR_REPLAY_DETECTED, "This QR code has already been used.");
+  }
+
+  try {
+    const display = await QrDisplay.findOne({ terminalId: displayId });
+    if (!display || !display.isActive || display.status !== TerminalStatus.ACTIVE) return;
+    await issueRotatingChallenge(display);
+  } catch (error) {
+    // Attendance and QR consumption are already committed. The display's expiry/reconnect
+    // refresh path will recover if issuing or broadcasting the successor briefly fails.
+    logger.error("Could not issue the next QR after successful attendance", error);
+  }
 }
 
 /**
@@ -566,6 +725,14 @@ export async function validateQrToken(tokenString: string): Promise<QrValidation
       isValid: false,
       code: ApiErrorCode.ERR_QR_REVOKED,
       message: "This QR token has been revoked.",
+    };
+  }
+
+  if (tokenRecord.consumedAt || tokenRecord.reservationId) {
+    return {
+      isValid: false,
+      code: ApiErrorCode.ERR_QR_REPLAY_DETECTED,
+      message: "This QR code has already been used.",
     };
   }
 
@@ -715,6 +882,8 @@ async function validateHmacSignedToken(rawPayload: string): Promise<QrValidation
       displayId: display.terminalId,
       terminalId: display.terminalId,
       display,
+      tokenIssuedAt: new Date(ts * 1000),
+      tokenExpiresAt: new Date((exp + latencyGrace) * 1000),
     };
   } catch {
     return {

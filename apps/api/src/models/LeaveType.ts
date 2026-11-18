@@ -47,7 +47,6 @@ const LeaveTypeSchema = new Schema<ILeaveType>(
       type: Number,
       required: [true, "Annual quota is required"],
       min: [0, "Quota cannot be negative"],
-      default: 12,
     },
     carryForwardRule: {
       allowed: { type: Boolean, default: false },

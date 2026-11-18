@@ -106,7 +106,7 @@ function VorldXFloatingCrystal() {
         <torusGeometry args={[2.2, 0.02, 16, 64]} />
         <meshStandardMaterial
           color="#818cf8"
-          emissive="#4f46e5"
+          emissive="#147FB5"
           emissiveIntensity={0.5}
           roughness={0.3}
           metalness={0.7}

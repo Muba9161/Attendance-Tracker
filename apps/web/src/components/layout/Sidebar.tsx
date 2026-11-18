@@ -7,6 +7,7 @@ import {
   BarChart3,
   Home,
   Users,
+  UserCog,
   Settings2,
   Tv,
   ShieldCheck,
@@ -19,6 +20,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { useLogoutConfirmation } from "../../hooks/useLogoutConfirmation";
 import { Badge } from "../ui/Badge";
 import { Tooltip } from "../ui/Tooltip";
 import {
@@ -37,6 +39,9 @@ export interface NavItem {
   flagKey?: keyof FeatureFlagsMap;
 }
 
+export const canViewNavItem = (item: NavItem, role?: string): boolean =>
+  !item.roles || (!!role && item.roles.includes(role));
+
 export interface NavGroup {
   groupName: string;
   items: NavItem[];
@@ -46,7 +51,7 @@ export const navGroups: NavGroup[] = [
   {
     groupName: "Overview & Analytics",
     items: [
-      { name: "Executive Dashboard", href: "/", icon: LayoutDashboard },
+      { name: "Dashboard", href: "/", icon: LayoutDashboard },
       { name: "Attendance Ledger", href: "/attendance", icon: CalendarCheck },
       { name: "Working Calendar", href: "/calendar", icon: Calendar },
       { name: "Reports & Analytics", href: "/reports", icon: BarChart3 },
@@ -59,7 +64,7 @@ export const navGroups: NavGroup[] = [
       { name: "WFH Approvals", href: "/wfh", icon: Home },
       { name: "Support Enquiries", href: "/enquiries", icon: LifeBuoy },
       { name: "Announcements", href: "/announcements", icon: Megaphone },
-      { name: "Employee Directory", href: "/employees", icon: Users },
+      { name: "Employee Management", href: "/employees", icon: Users },
     ],
   },
   {
@@ -67,9 +72,10 @@ export const navGroups: NavGroup[] = [
     items: [
       { name: "Policy & Shifts", href: "/policies", icon: Settings2 },
       { name: "Office QR Displays", href: "/displays", icon: Tv },
-      { name: "Security & Sessions", href: "/security", icon: Lock },
-      { name: "App Releases & OTA", href: "/releases", icon: Package },
       { name: "Audit Trail", href: "/audit-logs", icon: ShieldCheck },
+      { name: "HR Management", href: "/hr-management", icon: UserCog, roles: ["ADMIN"] },
+      { name: "Security & Sessions", href: "/security", icon: Lock, roles: ["ADMIN"] },
+      { name: "App Releases & OTA", href: "/releases", icon: Package, roles: ["ADMIN"] },
       { name: "3D Floor View", href: "/three-d", icon: Tv, flagKey: "threeD" },
     ],
   },
@@ -88,7 +94,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   isMobileDrawer = false,
 }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const { requestLogout, dialog: logoutDialog } = useLogoutConfirmation();
   const { data: flagData } = useFeatureFlags();
   const flags = flagData?.data;
 
@@ -116,6 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
+    <>
     <aside
       className={`flex flex-col h-full bg-slate-900 text-slate-300 border-r border-slate-800 shrink-0 select-none transition-all duration-200 ease-in-out ${
         collapsed ? "w-20" : "w-64"
@@ -130,18 +138,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-white p-1 flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0 border border-slate-200">
-            <img src="/vorldx-logo.png" alt="VorldX" className="w-8 h-8 object-contain" />
+            <img src="/vorldx-hero-logo.webp" alt="VorldX" className="w-8 h-8 object-contain" />
           </div>
           {!collapsed && (
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="text-base font-extrabold tracking-wider text-white uppercase block leading-none">
-                  Vorld<span className="text-cyan-400">X</span>
+                <span className="text-base font-extrabold tracking-wider text-[#147FB5] uppercase block leading-none">
+                  VORLD<span className="text-[#62666B]">X</span>
                 </span>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Platform Active" />
               </div>
               <span className="text-[10px] text-slate-400 tracking-wider uppercase font-medium mt-1 block truncate">
-                Workforce Suite
+                Industries Private Limited
               </span>
             </div>
           )}
@@ -175,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             if (item.flagKey && (!flags || !flags[item.flagKey])) {
               return false;
             }
-            if (item.roles && user?.role && !item.roles.includes(user.role)) {
+            if (!canViewNavItem(item, user?.role)) {
               return false;
             }
             return true;
@@ -299,13 +307,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2.5 px-0.5">
               <span className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>VorldX Enterprise</span>
+                <span>VORLDX INDUSTRIES PRIVATE LIMITED</span>
               </span>
               <span className="font-mono text-slate-400">v1.2.0</span>
             </div>
             <button
               type="button"
-              onClick={() => logout()}
+              onClick={requestLogout}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors border border-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -315,14 +323,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Tooltip content={`${user?.name || user?.email} (${user?.role})`} position="right">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs border border-blue-400/30">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 text-white flex items-center justify-center font-bold text-xs shadow-xs border border-blue-400/30">
                 {user?.name ? user.name.charAt(0).toUpperCase() : "U"}
               </div>
             </Tooltip>
             <Tooltip content="Sign Out" position="right">
               <button
                 type="button"
-                onClick={() => logout()}
+                onClick={requestLogout}
                 className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors border border-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
                 aria-label="Sign out of account"
               >
@@ -333,5 +341,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
     </aside>
+    {logoutDialog}
+    </>
   );
 };

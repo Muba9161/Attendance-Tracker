@@ -43,7 +43,7 @@ export function Avatar({
             borderRadius,
             backgroundColor: showRing ? colors.bgRaised : 'transparent',
             borderWidth: showRing ? 2 : 0,
-            borderColor: 'rgba(7, 8, 14, 0.75)',
+            borderColor: 'rgba(20, 37, 56, 0.75)',
           },
         ]}
       >

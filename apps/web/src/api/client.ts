@@ -90,24 +90,41 @@ export const tokenStorage = {
   },
 };
 
-const isLocalhost =
-  typeof window !== "undefined" &&
-  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+const isLocalDevelopmentHost = () =>
+  typeof window === "undefined" ||
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
 
-const DEFAULT_PROD_API = "https://attendance-tracker-56du.onrender.com";
+/** Resolve the API origin without silently selecting a different environment. */
+export function getApiBaseUrl(): string {
+  const configuredUrl =
+    import.meta.env.VITE_API_URL || import.meta.env.NEXT_PUBLIC_API_URL;
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.NEXT_PUBLIC_API_URL ||
-  (isLocalhost ? "" : DEFAULT_PROD_API)
-).replace(/\/$/, "");
+  if (configuredUrl) {
+    try {
+      const parsed = new URL(configuredUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+      return configuredUrl.replace(/\/$/, "");
+    } catch {
+      throw new ApiError(0, "API configuration error: VITE_API_URL must be a valid HTTP(S) URL.");
+    }
+  }
+
+  if (isLocalDevelopmentHost()) return ""; // Vite's /api proxy handles local development.
+
+  throw new ApiError(
+    0,
+    "API configuration error: configure VITE_API_URL for this external environment."
+  );
+}
 
 export function getFullApiUrl(endpoint: string): string {
   if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
     return endpoint;
   }
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
-  return API_BASE_URL ? `${API_BASE_URL}${cleanEndpoint}` : cleanEndpoint;
+  const baseUrl = getApiBaseUrl();
+  return baseUrl ? `${baseUrl}${cleanEndpoint}` : cleanEndpoint;
 }
 
 /**

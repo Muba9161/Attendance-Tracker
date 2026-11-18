@@ -31,8 +31,8 @@ import {
   useCreateCalendarEvent,
   useUpdateCalendarEvent,
   useDeleteCalendarEvent,
-  useWfhRequests,
-  useAttendanceRecords,
+  useCalendarWfhRequests,
+  useCalendarAttendanceRange,
   CalendarEventItem,
 } from "../api/queries";
 import { getFullApiUrl } from "../api/client";
@@ -66,6 +66,25 @@ interface DayCellInfo {
   isWeeklyOff: boolean;
 }
 
+const localDateKey = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+function getVisibleCalendarRange(date: Date, view: CalendarView): { start: string; end: string } {
+  if (view === "year") return { start: `${date.getFullYear()}-01-01`, end: `${date.getFullYear()}-12-31` };
+  if (view === "week") {
+    const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    startDate.setDate(startDate.getDate() - ((startDate.getDay() + 6) % 7));
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6);
+    return { start: localDateKey(startDate), end: localDateKey(endDate) };
+  }
+  const first = new Date(date.getFullYear(), date.getMonth(), 1);
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  last.setDate(last.getDate() + (6 - ((last.getDay() + 6) % 7)));
+  return { start: localDateKey(first), end: localDateKey(last) };
+}
+
 export const CalendarPage: React.FC = () => {
   const { user } = useAuth();
   const { prefersReducedMotion } = useTheme();
@@ -97,14 +116,14 @@ export const CalendarPage: React.FC = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<"add" | "edit" | "view">("add");
   const [selectedEvent, setSelectedEvent] = useState<CalendarEventItem | null>(null);
-  const [drawerDate, setDrawerDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [drawerDate, setDrawerDate] = useState<string>(() => localDateKey(new Date()));
 
   // Form State
   const [entryForm, setEntryForm] = useState({
     title: "",
     type: "holiday" as "holiday" | "companyOffDay" | "meeting" | "event",
-    startDate: new Date().toISOString().split("T")[0],
-    endDate: new Date().toISOString().split("T")[0],
+    startDate: localDateKey(new Date()),
+    endDate: localDateKey(new Date()),
     isFullDay: true,
     startTime: "09:00",
     endTime: "18:00",
@@ -128,6 +147,7 @@ export const CalendarPage: React.FC = () => {
 
   const activeYear = currentDate.getFullYear();
   const activeMonth = currentDate.getMonth(); // 0-indexed
+  const visibleRange = getVisibleCalendarRange(currentDate, view);
 
   // 1. Calendar Events Query
   const {
@@ -139,16 +159,22 @@ export const CalendarPage: React.FC = () => {
   } = useCalendarEvents(activeYear);
 
   // 2. Approved WFH Requests Query for Overlay
-  const { data: wfhResponse } = useWfhRequests({
-    status: "APPROVED",
-    limit: 100,
-  });
+  const {
+    data: wfhResponse,
+    isError: isWfhOverlayError,
+    error: wfhOverlayError,
+    refetch: refetchWfhOverlay,
+    isFetching: isWfhOverlayFetching,
+  } = useCalendarWfhRequests(visibleRange.start, visibleRange.end);
 
   // 3. Absences Query for Overlay
-  const { data: attendanceResponse } = useAttendanceRecords({
-    status: AttendanceStatus.ABSENT,
-    limit: 100,
-  });
+  const {
+    data: attendanceResponse,
+    isError: isAttendanceOverlayError,
+    error: attendanceOverlayError,
+    refetch: refetchAttendanceOverlay,
+    isFetching: isAttendanceOverlayFetching,
+  } = useCalendarAttendanceRange(visibleRange.start, visibleRange.end);
 
   // Mutations
   const createMutation = useCreateCalendarEvent();
@@ -328,8 +354,8 @@ export const CalendarPage: React.FC = () => {
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEventItem[]>();
     for (const evt of filteredEvents) {
-      const sKey = new Date(evt.startDate).toISOString().split("T")[0];
-      const eKey = new Date(evt.endDate).toISOString().split("T")[0];
+      const sKey = evt.startDate.slice(0, 10);
+      const eKey = evt.endDate.slice(0, 10);
 
       // Insert for all dates in range
       let curr = sKey;
@@ -480,13 +506,13 @@ export const CalendarPage: React.FC = () => {
     if (startDayOfWeek === -1) startDayOfWeek = 6;
 
     const cells: DayCellInfo[] = [];
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = localDateKey(new Date());
 
     // Previous month filler days
     const prevMonthLastDay = new Date(activeYear, activeMonth, 0).getDate();
     for (let i = startDayOfWeek - 1; i >= 0; i--) {
       const d = new Date(activeYear, activeMonth - 1, prevMonthLastDay - i);
-      const dateKey = d.toISOString().split("T")[0];
+      const dateKey = localDateKey(d);
       const dow = d.getDay();
       cells.push({
         date: d,
@@ -517,7 +543,7 @@ export const CalendarPage: React.FC = () => {
     const totalRemaining = (7 - (cells.length % 7)) % 7;
     for (let d = 1; d <= totalRemaining; d++) {
       const cur = new Date(activeYear, activeMonth + 1, d);
-      const dateKey = cur.toISOString().split("T")[0];
+      const dateKey = localDateKey(cur);
       const dow = cur.getDay();
       cells.push({
         date: cur,
@@ -542,7 +568,7 @@ export const CalendarPage: React.FC = () => {
       });
       return;
     }
-    const target = dateKey || new Date().toISOString().split("T")[0];
+    const target = dateKey || localDateKey(new Date());
     setDrawerDate(target);
     setDrawerMode("add");
     setSelectedEvent(null);
@@ -1045,12 +1071,12 @@ export const CalendarPage: React.FC = () => {
           </div>
 
           {/* Search Box, Type Filter & Shortcuts hint */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
               aria-label="Filter events by type"
-              className="px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-xs text-slate-800 dark:text-slate-200"
+              className="w-full sm:w-auto min-w-0 px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-xs text-slate-800 dark:text-slate-200"
             >
               <option value="all">All Types</option>
               <option value="holiday">Public Holidays</option>
@@ -1066,7 +1092,7 @@ export const CalendarPage: React.FC = () => {
                 placeholder="Filter events..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-xs w-36 text-slate-800 dark:text-slate-200 placeholder-slate-400"
+                className="pl-8 pr-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md text-xs w-full sm:w-36 text-slate-800 dark:text-slate-200 placeholder-slate-400"
               />
             </div>
 
@@ -1133,6 +1159,16 @@ export const CalendarPage: React.FC = () => {
         />
       ) : (
         <>
+          {isWfhOverlayError && (
+            <ErrorState title="WFH calendar overlay unavailable"
+              message={wfhOverlayError instanceof Error ? wfhOverlayError.message : "Unable to load WFH entries."}
+              onRetry={() => void refetchWfhOverlay()} isRetrying={isWfhOverlayFetching} className="p-4" />
+          )}
+          {isAttendanceOverlayError && (
+            <ErrorState title="Attendance calendar overlay unavailable"
+              message={attendanceOverlayError instanceof Error ? attendanceOverlayError.message : "Unable to load attendance entries."}
+              onRetry={() => void refetchAttendanceOverlay()} isRetrying={isAttendanceOverlayFetching} className="p-4" />
+          )}
           {/* ========================================================= */}
           {/* VIEW 1: MONTH VIEW (7-COLUMN GRID) */}
           {/* ========================================================= */}
@@ -1182,17 +1218,17 @@ export const CalendarPage: React.FC = () => {
                       key={cell.dateKey}
                       onClick={() => setSelectedDateKey(cell.dateKey)}
                       className={clsx(
-                        "min-h-[110px] p-2 flex flex-col justify-between transition-all group relative cursor-pointer hover:bg-blue-50/40 dark:hover:bg-blue-950/20",
+                        "min-h-[82px] sm:min-h-[110px] min-w-0 p-1 sm:p-2 flex flex-col justify-between transition-all group relative cursor-pointer hover:bg-blue-50/40 dark:hover:bg-blue-950/20",
                         bgClass,
                         isSelected
-                          ? "ring-2 ring-indigo-500 ring-offset-1 dark:ring-offset-slate-900 bg-indigo-50/60 dark:bg-indigo-950/40 z-20 shadow-xs"
+                          ? "ring-2 ring-inset ring-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 z-20 shadow-xs"
                           : cell.isToday
                           ? "ring-2 ring-blue-600 ring-inset dark:ring-blue-500 font-bold z-10"
                           : ""
                       )}
                     >
                       {/* Top Header of Cell: Date Number & Badges */}
-                      <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span
                             className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs ${
@@ -1207,7 +1243,7 @@ export const CalendarPage: React.FC = () => {
                           </span>
 
                           {cell.isToday && (
-                            <span className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                            <span className="hidden sm:inline text-[10px] font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
                               Today
                             </span>
                           )}
@@ -1221,7 +1257,7 @@ export const CalendarPage: React.FC = () => {
                               e.stopPropagation();
                               handleOpenAddDrawer(cell.dateKey);
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 rounded transition-opacity"
+                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-blue-600 rounded transition-opacity"
                             title="Add event on this date"
                           >
                             <Plus className="w-3.5 h-3.5" />
@@ -1230,7 +1266,22 @@ export const CalendarPage: React.FC = () => {
                       </div>
 
                       {/* Middle: Events & Overlays */}
-                      <div className="space-y-1 my-1 overflow-hidden">
+                      <div
+                        className="sm:hidden flex items-center gap-1 min-h-5"
+                        aria-label={`Day indicators: ${dayEvents.length} calendar events, ${dayWfh.length} approved WFH, ${dayAbsences.length} absences`}
+                      >
+                        {dayEvents.length > 0 && (
+                          <span title={`${dayEvents.length} calendar events`} className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                        )}
+                        {dayWfh.length > 0 && (
+                          <span title={`${dayWfh.length} approved WFH`} className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                        )}
+                        {dayAbsences.length > 0 && (
+                          <span title={`${dayAbsences.length} recorded absences`} className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        )}
+                      </div>
+
+                      <div className="hidden sm:block space-y-1 my-1 min-w-0">
                         {/* Calendar Events (Holidays, Meetings, Corporate Events) */}
                         {dayEvents.slice(0, 3).map((evt) => {
                           const badge = getEventBadge(evt);
@@ -1268,10 +1319,10 @@ export const CalendarPage: React.FC = () => {
                                   e.stopPropagation();
                                   handleOpenEditDrawer(evt);
                                 }}
-                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium border truncate transition-transform hover:scale-[1.01] ${badge.bg}`}
+                                className={`flex items-center gap-1 min-w-0 px-1.5 py-0.5 rounded text-[11px] font-medium border transition-transform hover:scale-[1.01] ${badge.bg}`}
                               >
                                 {badge.icon}
-                                <span className="truncate">{evt.title}</span>
+                                <span className="min-w-0 flex-1 truncate">{evt.title}</span>
                               </div>
                             </Tooltip>
                           );
@@ -1304,9 +1355,9 @@ export const CalendarPage: React.FC = () => {
                               </div>
                             }
                           >
-                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-[10px] font-semibold text-sky-800 dark:text-sky-300 truncate">
+                            <div className="flex items-center gap-1 min-w-0 px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-[10px] font-semibold text-sky-800 dark:text-sky-300">
                               <Home className="w-3 h-3 text-sky-600 shrink-0" />
-                              <span>{dayWfh.length} WFH</span>
+                              <span className="truncate">{dayWfh.length} WFH</span>
                             </div>
                           </Tooltip>
                         )}
@@ -1329,31 +1380,31 @@ export const CalendarPage: React.FC = () => {
                               </div>
                             }
                           >
-                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-800 dark:text-rose-300 truncate">
+                            <div className="flex items-center gap-1 min-w-0 px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-800 dark:text-rose-300">
                               <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
-                              <span>{dayAbsences.length} Absent</span>
+                              <span className="truncate">{dayAbsences.length} Absent</span>
                             </div>
                           </Tooltip>
                         )}
                       </div>
 
                       {/* Bottom Footer: Day Type indicator */}
-                      <div className="text-right">
+                      <div className="text-right whitespace-nowrap leading-tight">
                         {isHoliday ? (
-                          <span className="text-[9px] font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider">
-                            Public Holiday
+                          <span title="Public Holiday" className="text-[7px] sm:text-[9px] font-extrabold text-indigo-700 dark:text-indigo-400 uppercase tracking-normal sm:tracking-wider">
+                            <span className="sm:hidden">HOLIDAY</span><span className="hidden sm:inline">Public Holiday</span>
                           </span>
                         ) : isOffDay ? (
-                          <span className="text-[9px] font-extrabold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
-                            Company Off
+                          <span title="Company Off" className="text-[7px] sm:text-[9px] font-extrabold text-amber-700 dark:text-amber-400 uppercase tracking-normal sm:tracking-wider">
+                            <span className="sm:hidden">OFF</span><span className="hidden sm:inline">Company Off</span>
                           </span>
                         ) : cell.isWeeklyOff ? (
-                          <span className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                            Weekly-Off
+                          <span title="Weekly Off" className="text-[7px] sm:text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-normal sm:tracking-wider">
+                            <span className="sm:hidden">OFF</span><span className="hidden sm:inline">Weekly-Off</span>
                           </span>
                         ) : (
-                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-                            Workday
+                          <span title="Workday" className="text-[7px] sm:text-[9px] text-emerald-600 dark:text-emerald-400 uppercase tracking-normal sm:tracking-wider">
+                            <span className="sm:hidden">WORK</span><span className="hidden sm:inline">Workday</span>
                           </span>
                         )}
                       </div>
@@ -1379,8 +1430,8 @@ export const CalendarPage: React.FC = () => {
                 const day = d.getDay();
                 const diff = d.getDate() - day + (day === 0 ? -6 : 1) + i;
                 const weekDayDate = new Date(d.setDate(diff));
-                const dateKey = weekDayDate.toISOString().split("T")[0];
-                const isToday = dateKey === new Date().toISOString().split("T")[0];
+                const dateKey = localDateKey(weekDayDate);
+                const isToday = dateKey === localDateKey(new Date());
                 const isSelected = dateKey === selectedDateKey;
                 const dayName = weekDayDate.toLocaleDateString("en-US", { weekday: "short" });
                 const dayNumber = weekDayDate.getDate();
@@ -1595,7 +1646,7 @@ export const CalendarPage: React.FC = () => {
                         const dayEvents = eventsByDate.get(dateKey) || [];
                         const isHoliday = dayEvents.some((e) => e.type === "holiday");
                         const isOffDay = dayEvents.some((e) => e.type === "companyOffDay");
-                        const isToday = dateKey === new Date().toISOString().split("T")[0];
+                        const isToday = dateKey === localDateKey(new Date());
 
                         return (
                           <div

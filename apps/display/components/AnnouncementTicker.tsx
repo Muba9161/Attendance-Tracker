@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Megaphone, Sparkles, AlertTriangle, AlertCircle, Pin, X } from "lucide-react";
-import { io, Socket } from "socket.io-client";
+import { getDisplayApiBaseUrl } from "../lib/api";
 
 interface DisplayAnnouncement {
   _id: string;
@@ -15,8 +15,6 @@ interface DisplayAnnouncement {
   startsAt: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-
 export const AnnouncementTicker: React.FC = () => {
   const [announcements, setAnnouncements] = useState<DisplayAnnouncement[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -25,7 +23,7 @@ export const AnnouncementTicker: React.FC = () => {
   // Fetch initial public announcements
   const fetchAnnouncements = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/announcements/public?limit=8`);
+      const res = await fetch(`${getDisplayApiBaseUrl()}/api/announcements/public?limit=8`);
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
@@ -40,29 +38,12 @@ export const AnnouncementTicker: React.FC = () => {
   useEffect(() => {
     fetchAnnouncements();
 
-    // Connect to Socket.IO for real-time delivery
-    let socket: Socket | null = null;
-    try {
-      socket = io(API_BASE, {
-        transports: ["websocket", "polling"],
-        reconnection: true,
-      });
-
-      socket.on("announcement.published", () => {
-        fetchAnnouncements();
-      });
-
-      socket.on("announcement.pinned", () => {
-        fetchAnnouncements();
-      });
-    } catch {
-      // socket init error
-    }
+    // MainScreen owns the display's single authenticated Socket.IO connection.
+    const refreshListener = () => { void fetchAnnouncements(); };
+    window.addEventListener("display:announcement-update", refreshListener);
 
     return () => {
-      if (socket) {
-        socket.disconnect();
-      }
+      window.removeEventListener("display:announcement-update", refreshListener);
     };
   }, []);
 

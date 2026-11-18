@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { Image, View, StyleSheet } from 'react-native';
+import heroLogo from '../assets/vorldx-hero-logo.webp';
 import { useRouter } from 'expo-router';
 import { ArrowRight } from 'lucide-react-native';
 import { useAuth } from '../src/context/AuthContext';
@@ -8,9 +9,8 @@ import {
   Button,
   Text,
   DashboardSkeleton,
-  Globe3DStand,
 } from '../src/components';
-import { colors, spacing } from '../src/theme/tokens';
+import { brandColors, colors, spacing } from '../src/theme/tokens';
 import { useResponsive } from '../src/lib/responsive';
 
 export default function WelcomeScreen() {
@@ -35,20 +35,20 @@ export default function WelcomeScreen() {
   return (
     <Screen edges={['top', 'bottom']} contentContainerStyle={styles.screenInner}>
       <View style={[styles.container, isWide && styles.containerWide]}>
-        {/* Top Branding Section */}
-        <View style={styles.brandingSection}>
-          <Text variant="display" align="center" style={styles.brandTitle}>
-            <Text style={styles.capLetter}>V</Text>orld<Text style={[styles.brandAccent, styles.capLetter]}>X</Text>
-          </Text>
-          <Text variant="subheading" color={colors.textSecondary} align="center" style={styles.tagline}>
-            Workforce Attendance & Remote Operations
-          </Text>
+        {/* Original VORLDX company logo */}
+        <View style={styles.globeSection}>
+          <Image
+            source={heroLogo}
+            style={[styles.heroLogo, { width: isWide ? 260 : 220, height: isWide ? 260 : 220 }]}
+            resizeMode="contain"
+            accessible
+            accessibilityLabel="VORLDX Industries Private Limited logo"
+          />
         </View>
 
-        {/* 3D Continuously Revolving Earth Globe on Cursive 'X' Stand */}
-        <View style={styles.globeSection}>
-          <Globe3DStand size={isWide ? 260 : 230} />
-        </View>
+        <Text variant="subheading" color={colors.textSecondary} align="center" style={styles.description}>
+          Attendance Management System
+        </Text>
 
         {/* Action Buttons */}
         <View style={styles.actionSection}>
@@ -57,6 +57,9 @@ export default function WelcomeScreen() {
             onPress={() => router.push('/login')}
             variant="primary"
             size="lg"
+            fullWidth={false}
+            gradientColors={[brandColors.oceanBlue, brandColors.oceanBlue]}
+            style={[styles.welcomeButton, styles.loginButton]}
             testID="btn-login"
             rightIcon={<ArrowRight size={17} color={colors.white} strokeWidth={2.2} />}
           />
@@ -66,9 +69,14 @@ export default function WelcomeScreen() {
             onPress={() => router.push('/register')}
             variant="secondary"
             size="lg"
+            fullWidth={false}
+            style={[styles.welcomeButton, styles.activateButton]}
             testID="btn-register"
           />
         </View>
+        <Text variant="caption" color={colors.muted} align="center" style={styles.footer}>
+          © 2026 VORLDX INDUSTRIES PRIVATE LIMITED. All rights reserved.
+        </Text>
       </View>
     </Screen>
   );
@@ -92,40 +100,46 @@ const styles = StyleSheet.create({
   containerWide: {
     maxWidth: 540,
   },
-  brandingSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  brandTitle: {
-    fontSize: 32,
-    lineHeight: 44,
-    marginTop: 2,
-    fontWeight: '700',
-    letterSpacing: -0.5,
+  description: {
     textAlign: 'center',
-  },
-  capLetter: {
-    fontSize: 38,
-    lineHeight: 44,
-    fontWeight: '800',
-  },
-  brandAccent: {
-    color: colors.indigoSoft,
-  },
-  tagline: {
-    marginTop: -2,
-    textAlign: 'center',
+    marginTop: -spacing.lg,
   },
   globeSection: {
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 4,
   },
+  heroLogo: {
+    maxWidth: '100%',
+  },
   actionSection: {
     width: '100%',
     alignItems: 'center',
     gap: spacing.md,
     marginTop: spacing.xs,
+  },
+  welcomeButton: {
+    width: '100%',
+    maxWidth: 280,
+    height: 55,
+    borderRadius: 13,
+  },
+  loginButton: {
+    shadowColor: brandColors.oceanBlue,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 9,
+    elevation: 4,
+  },
+  activateButton: {
+    backgroundColor: 'rgba(20, 37, 56, 0.35)',
+    borderColor: brandColors.oceanBlue,
+  },
+  footer: {
+    width: '100%',
+    marginTop: spacing.md,
+    lineHeight: 16,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
 });

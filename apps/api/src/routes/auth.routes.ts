@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { authController } from "../controllers/auth.controller";
 import { validate } from "../middleware/validate";
 import { authenticate, requireRole } from "../middleware/auth";
@@ -14,6 +15,8 @@ import {
   ResetPasswordRequestSchema,
   VerifyEmailRequestSchema,
   ResendVerificationRequestSchema,
+  VerifySignupOtpRequestSchema,
+  ResendSignupOtpRequestSchema,
   StaffInviteRequestSchema,
   UserRole,
 } from "@vorldx/shared";
@@ -30,6 +33,20 @@ router.post(
   authRateLimiter,
   validate({ body: SignupRequestSchema }),
   authController.signup
+);
+
+router.post(
+  ["/api/auth/signup/verify-otp", "/auth/signup/verify-otp"],
+  authRateLimiter,
+  validate({ body: VerifySignupOtpRequestSchema }),
+  authController.verifySignupOtp
+);
+
+router.post(
+  ["/api/auth/signup/resend-otp", "/auth/signup/resend-otp"],
+  authRateLimiter,
+  validate({ body: ResendSignupOtpRequestSchema }),
+  authController.resendSignupOtp
 );
 
 /**
@@ -93,6 +110,63 @@ router.post(
   authController.invite
 );
 
+router.get(
+  ["/api/auth/hr-management", "/auth/hr-management"],
+  authenticate,
+  requireRole(UserRole.ADMIN),
+  authController.listHrManagement
+);
+
+router.post(
+  ["/api/auth/hr-management", "/auth/hr-management"],
+  authenticate,
+  requireRole(UserRole.ADMIN),
+  validate({
+    body: z.object({
+      name: z.string().trim().min(2).max(100),
+      email: z.string().trim().email().max(254).toLowerCase(),
+      department: z.string().trim().min(1).max(100),
+      designation: z.string().trim().min(1).max(100),
+      password: z.string().min(8).max(128),
+    }),
+  }),
+  authController.createHrAccount
+);
+
+router.post(
+  ["/api/auth/hr-management/:recordId/resend", "/auth/hr-management/:recordId/resend"],
+  authenticate,
+  requireRole(UserRole.ADMIN),
+  authController.resendHrInvitation
+);
+
+router.patch(
+  ["/api/auth/hr-management/:userId/status", "/auth/hr-management/:userId/status"],
+  authenticate,
+  requireRole(UserRole.ADMIN),
+  validate({ body: z.object({ status: z.enum(["ACTIVE", "INACTIVE"]) }) }),
+  authController.setHrAccountStatus
+);
+
+router.patch(
+  ["/api/auth/hr-management/:recordId", "/auth/hr-management/:recordId"],
+  authenticate,
+  requireRole(UserRole.ADMIN),
+  validate({ body: z.object({
+    name: z.string().trim().min(2).max(100),
+    department: z.string().trim().min(1).max(100),
+    designation: z.string().trim().min(1).max(100),
+  }) }),
+  authController.updateHrManagementRecord
+);
+
+router.delete(
+  ["/api/auth/hr-management/:recordId", "/auth/hr-management/:recordId"],
+  authenticate,
+  requireRole(UserRole.ADMIN),
+  authController.deleteHrManagementRecord
+);
+
 /**
  * @route   GET /api/auth/verify-invite (alias: /auth/verify-invite)
  * @desc    Validates invitation token before showing staff signup form
@@ -114,6 +188,27 @@ router.post(
   authRateLimiter,
   validate({ body: RegisterStartRequestSchema }),
   authController.registerStart
+);
+
+router.post(
+  ["/api/auth/register-resend", "/auth/register-resend"],
+  authRateLimiter,
+  validate({ body: RegisterStartRequestSchema }),
+  authController.registerResend
+);
+
+router.post(
+  ["/api/auth/mobile/register-start", "/auth/mobile/register-start"],
+  authRateLimiter,
+  validate({ body: RegisterStartRequestSchema }),
+  authController.mobileRegisterStart
+);
+
+router.post(
+  ["/api/auth/mobile/register-resend", "/auth/mobile/register-resend"],
+  authRateLimiter,
+  validate({ body: RegisterStartRequestSchema }),
+  authController.registerResend
 );
 
 /**

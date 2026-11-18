@@ -40,7 +40,7 @@ export class EmployeeController {
 
   public getMe = asyncHandler(async (req: Request, res: Response) => {
     const actor = this.getActorContext(req);
-    const employee = await employeeService.getEmployeeById(actor.employeeId);
+    const employee = await employeeService.getEmployeeForUser(actor.userId, actor.employeeId);
     res.status(200).json({
       success: true,
       data: employee,

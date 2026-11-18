@@ -47,7 +47,7 @@ export function Card({
           pointerEvents="none"
           colors={[
             toneStyle.bg,
-            variant === 'tint' ? 'rgba(7, 8, 14, 0.15)' : 'rgba(7, 8, 14, 0.02)',
+            variant === 'tint' ? 'rgba(20, 37, 56, 0.15)' : 'rgba(20, 37, 56, 0.02)',
           ]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -101,16 +101,16 @@ const styles = StyleSheet.create({
   },
   raised: {
     backgroundColor: colors.surfaceStrong,
-    borderColor: 'rgba(184, 190, 255, 0.18)',
+    borderColor: 'rgba(184, 204, 214, 0.18)',
   },
   soft: {
     backgroundColor: colors.surfaceSoft,
-    borderColor: 'rgba(184, 190, 255, 0.08)',
+    borderColor: 'rgba(184, 204, 214, 0.08)',
     shadowOpacity: 0,
   },
   tint: {
     backgroundColor: colors.surface,
-    borderColor: 'rgba(184, 190, 255, 0.22)',
+    borderColor: 'rgba(184, 204, 214, 0.22)',
   },
   highlight: {
     position: 'absolute',

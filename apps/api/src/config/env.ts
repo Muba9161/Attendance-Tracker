@@ -1,28 +1,43 @@
 import dotenv from "dotenv";
+import path from "path";
+import { setServers } from "node:dns";
 import { z } from "zod";
 
-// Load environment variables from .env file
-dotenv.config();
+// Load package-local configuration first, then fill missing values from the
+// repository root. dotenv's default override=false preserves platform values.
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
+
+const isProduction = process.env.NODE_ENV === "production";
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
-  MONGODB_URI: z
-    .string()
-    .min(1, "MONGODB_URI is required")
-    .default(
-      process.env.NODE_ENV === "test"
+  MONGODB_URI: z.string().min(1, "MONGODB_URI is required").default(
+    isProduction
+      ? ""
+      : process.env.NODE_ENV === "test"
         ? "mongodb://localhost:27017/vorldx_test"
         : "mongodb://localhost:27017/vorldx_attendance"
-    ),
-  JWT_SECRET: z
-    .string()
-    .min(32, "JWT_SECRET must be at least 32 characters for security")
-    .default(
-      process.env.NODE_ENV === "test"
+  ),
+  MONGODB_DNS_SERVERS: z.string().default(""),
+  BREVO_API_KEY: z.string().default(""),
+  BREVO_SENDER_EMAIL: z.string().email().or(z.literal("")).default(""),
+  BREVO_SENDER_NAME: z.string().default("VORLDX Employee Attendance System"),
+  SMTP_HOST: z.string().default(""),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: z.preprocess((val) => val === "true" || val === true, z.boolean()).default(false),
+  SMTP_USER: z.string().default(""),
+  SMTP_PASS: z.string().default(""),
+  SMTP_FROM_EMAIL: z.string().email().or(z.literal("")).default(""),
+  SMTP_FROM_NAME: z.string().default("VORLDX INDUSTRIES PRIVATE LIMITED"),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters for security").default(
+    isProduction
+      ? ""
+      : process.env.NODE_ENV === "test"
         ? "test-secret-at-least-32-characters-vorldx-jwt"
         : "demo-secret-key-at-least-32-chars-long-vorldx"
-    ),
+  ),
   CORS_ORIGIN: z
     .string()
     .default("http://localhost:3000,http://localhost:3001,http://localhost:8081"),
@@ -33,8 +48,7 @@ const EnvSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   JWT_EXPIRES_IN: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRES_DAYS: z.coerce.number().int().positive().default(7),
-  ADMIN_DEFAULT_PASSWORD: z.string().default("Admin@VorldX2026!"),
-  HR_DEFAULT_PASSWORD: z.string().default("Hr@VorldX2026!"),
+  ADMIN_DEFAULT_PASSWORD: z.string().optional(),
   EMPLOYEE_DEFAULT_PASSWORD: z.string().default("Employee@2026!"),
   MAX_LOGIN_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
@@ -93,6 +107,13 @@ try {
     NODE_ENV: "test",
     JWT_SECRET: "test-secret-at-least-32-characters-vorldx-jwt",
   });
+}
+
+const configuredDnsServers = envConfig.MONGODB_DNS_SERVERS.split(",")
+  .map((server) => server.trim())
+  .filter(Boolean);
+if (configuredDnsServers.length > 0) {
+  setServers(configuredDnsServers);
 }
 
 export const env = envConfig;

@@ -24,7 +24,8 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "demo": "tsx scripts/dev-demo.ts",
     "test:e2e": "tsx scripts/verify-14-step-workflow.ts",
-    "seed": "npm run seed --workspace=@vorldx/api"
+    "seed": "npm run seed --workspace=@vorldx/api",
+    "admin:setup": "npm run admin:setup --workspace=@vorldx/api"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.21.0",
@@ -38,6 +39,8 @@
     "vite": "^6.1.0"
   },
   "dependencies": {
+    "dotenv": "^18.0.9",
+    "mongodb": "^7.8.0",
     "vite": "^6.1.0"
   }
 }

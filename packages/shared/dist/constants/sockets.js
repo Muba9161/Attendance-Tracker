@@ -7,6 +7,7 @@ exports.SocketRoom = exports.SocketEvent = void 0;
 exports.SocketEvent = {
     // Primary Canonical Event Names (assignment requirement)
     ATTENDANCE_UPDATED: "attendance.updated",
+    ATTENDANCE_DISPLAY_CONFIRMATION: "attendance.display_confirmation",
     WFH_DECIDED: "wfh.decided",
     WFH_CREATED: "wfh.created",
     EMPLOYEE_REGISTERED: "employee.registered",

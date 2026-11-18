@@ -99,7 +99,7 @@ export const VersionUpdateBanner: React.FC = () => {
   if (dismissed) return null;
 
   return (
-    <aside aria-label="Update notification" className="sticky top-0 z-40 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 shadow-md flex items-center justify-between gap-3 text-xs md:text-sm animate-in slide-in-from-top">
+    <aside aria-label="Update notification" className="sticky top-0 z-40 bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-4 py-2.5 shadow-md flex items-center justify-between gap-3 text-xs md:text-sm animate-in slide-in-from-top">
       <div className="flex items-center gap-2.5 min-w-0">
         <span className="p-1 rounded-md bg-white/20 text-white shrink-0">
           <Sparkles className="w-4 h-4" />

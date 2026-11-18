@@ -31,6 +31,7 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Modal } from "../components/ui/Modal";
 import { LivePulseIndicator } from "../components/ui/LivePulseIndicator";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { Skeleton } from "../components/ui/Skeleton";
 
 interface LiveSecurityEvent {
@@ -53,16 +54,22 @@ export const SecurityPage: React.FC = () => {
   const {
     data: sessionsData,
     isLoading: sessionsLoading,
+    isError: sessionsError,
+    error: sessionsErrorValue,
+    isFetching: sessionsFetching,
     refetch: refetchSessions,
   } = useStaffSessions();
 
   const {
     data: devicesData,
     isLoading: devicesLoading,
+    isError: devicesError,
+    error: devicesErrorValue,
+    isFetching: devicesFetching,
     refetch: refetchDevices,
   } = useTrustedDevices();
 
-  const { data: auditData } = useAuditLogs({
+  const { data: auditData, isError: auditError, error: auditErrorValue, isFetching: auditFetching, refetch: refetchAudit } = useAuditLogs({
     entityType: "AUTH",
     limit: 8,
   });
@@ -398,6 +405,10 @@ export const SecurityPage: React.FC = () => {
             <Skeleton className="h-20 w-full rounded-xl" />
             <Skeleton className="h-20 w-full rounded-xl" />
           </div>
+        ) : sessionsError && !sessionsData ? (
+          <ErrorState title="Unable to load sessions"
+            message={sessionsErrorValue instanceof Error ? sessionsErrorValue.message : "The session request failed."}
+            onRetry={() => void refetchSessions()} isRetrying={sessionsFetching} />
         ) : sessions.length === 0 ? (
           <EmptyState
             icon={ShieldCheck}
@@ -405,6 +416,10 @@ export const SecurityPage: React.FC = () => {
             description="No active sessions detected for your account."
           />
         ) : (
+          <>
+          {sessionsError && <ErrorState title="Session refresh failed"
+            message={sessionsErrorValue instanceof Error ? sessionsErrorValue.message : "Showing the last loaded sessions."}
+            onRetry={() => void refetchSessions()} isRetrying={sessionsFetching} className="mb-3 p-3" />}
           <div className="space-y-3">
             {sessions.map((sess) => {
               const Icon = getPlatformIcon(sess.device?.platform, sess.userAgent);
@@ -475,6 +490,7 @@ export const SecurityPage: React.FC = () => {
               );
             })}
           </div>
+          </>
         )}
       </Card>
 
@@ -494,6 +510,10 @@ export const SecurityPage: React.FC = () => {
 
         {devicesLoading ? (
           <Skeleton className="h-20 w-full rounded-xl" />
+        ) : devicesError && !devicesData ? (
+          <ErrorState title="Unable to load trusted devices"
+            message={devicesErrorValue instanceof Error ? devicesErrorValue.message : "The trusted-device request failed."}
+            onRetry={() => void refetchDevices()} isRetrying={devicesFetching} />
         ) : devices.length === 0 ? (
           <EmptyState
             icon={ShieldCheck}
@@ -501,6 +521,10 @@ export const SecurityPage: React.FC = () => {
             description="When signing in, check 'Remember this device for 30 days' to whitelist your hardware."
           />
         ) : (
+          <>
+          {devicesError && <ErrorState title="Device refresh failed"
+            message={devicesErrorValue instanceof Error ? devicesErrorValue.message : "Showing the last loaded devices."}
+            onRetry={() => void refetchDevices()} isRetrying={devicesFetching} className="mb-3 p-3" />}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {devices.map((dev) => (
               <div
@@ -539,6 +563,7 @@ export const SecurityPage: React.FC = () => {
               </div>
             ))}
           </div>
+          </>
         )}
       </Card>
 
@@ -556,7 +581,11 @@ export const SecurityPage: React.FC = () => {
           </p>
         </div>
 
-        {auditLogs.length === 0 ? (
+        {auditError && !auditData ? (
+          <ErrorState title="Unable to load authentication history"
+            message={auditErrorValue instanceof Error ? auditErrorValue.message : "The audit request failed."}
+            onRetry={() => void refetchAudit()} isRetrying={auditFetching} />
+        ) : auditLogs.length === 0 ? (
           <p className="text-xs text-slate-400 py-4 text-center">No recent authentication logs.</p>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">

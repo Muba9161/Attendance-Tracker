@@ -14,7 +14,7 @@ export type QrPayload = z.infer<typeof QrPayloadSchema>;
 
 export const TerminalCreateRequestSchema = z.object({
   name: z.string().min(2, "Terminal name must be at least 2 characters").max(100),
-  location: z.string().min(2, "Location description is required").max(100),
+  location: z.string().trim().min(2, "Location description is required").max(200),
 });
 
 export type TerminalCreateRequest = z.infer<typeof TerminalCreateRequestSchema>;

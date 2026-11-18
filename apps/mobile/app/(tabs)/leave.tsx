@@ -39,6 +39,7 @@ import {
 import { useToast } from '../../src/components/Toast';
 import { colors, fonts, radii, spacing, type Tone } from '../../src/theme/tokens';
 import { useResponsive } from '../../src/lib/responsive';
+import { getLocalDateKey } from '../../src/lib/date';
 import { useAuth } from '../../src/context/AuthContext';
 import {
   leaveApi,
@@ -77,74 +78,15 @@ function formatDateDisplay(isoString: string): string {
   }
 }
 
+function getBalanceTypeId(balance: LeaveBalanceItem): string | undefined {
+  return 'id' in balance.type ? balance.type.id || balance.type._id : balance.type._id;
+}
 
-const DEFAULT_LEAVE_TYPES: LeaveTypeItem[] = [
-  {
-    _id: '6ae317bd1dae01ec3c4d1cec',
-    name: 'Casual Leave',
-    code: 'CL',
-    paid: true,
-    annualQuota: 12,
-    halfDayAllowed: true,
-    description: 'Casual leave for personal or urgent matters',
-    isActive: true,
-  },
-  {
-    _id: '6ae317be1dae01ec3c4d1cf2',
-    name: 'Sick Leave',
-    code: 'SL',
-    paid: true,
-    annualQuota: 10,
-    halfDayAllowed: true,
-    description: 'Medical and health leave',
-    isActive: true,
-  },
-  {
-    _id: '6ae317bf1dae01ec3c4d1cf8',
-    name: 'Annual Leave',
-    code: 'AL',
-    paid: true,
-    annualQuota: 15,
-    halfDayAllowed: false,
-    description: 'Privileged earned time off',
-    isActive: true,
-  },
-  {
-    _id: '6ae317c11dae01ec3c4d1cff',
-    name: 'Earned Leave',
-    code: 'EL',
-    paid: true,
-    annualQuota: 18,
-    halfDayAllowed: false,
-    description: 'Privileged earned time off',
-    isActive: true,
-  },
-  {
-    _id: '6ae317c21dae01ec3c4d1d05',
-    name: 'Maternity/Paternity',
-    code: 'ML',
-    paid: true,
-    annualQuota: 84,
-    halfDayAllowed: false,
-    description: 'Parental care time off',
-    isActive: true,
-  },
-  {
-    _id: '6ae317c31dae01ec3c4d1d0b',
-    name: 'Unpaid Leave (LWP)',
-    code: 'UL',
-    paid: false,
-    annualQuota: 30,
-    halfDayAllowed: true,
-    description: 'Leave without pay',
-    isActive: true,
-  },
-];
 
 export default function LeaveScreen() {
   const { user } = useAuth();
   const { showToast } = useToast();
-  const { isWide } = useResponsive();
+  const { isWide, width, height } = useResponsive();
 
   const isHrOrAdmin = Boolean(
     user?.role === 'HR' || user?.role === 'ADMIN' || user?.role === 'HR_ADMIN'
@@ -157,6 +99,12 @@ export default function LeaveScreen() {
   // Leave Data
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>([]);
   const [balances, setBalances] = useState<LeaveBalanceItem[]>([]);
+  const [leaveDataErrors, setLeaveDataErrors] = useState<{ types: boolean; balances: boolean; requests: boolean; teamRequests: boolean }>({
+    types: false,
+    balances: false,
+    requests: false,
+    teamRequests: false,
+  });
   const [myRequests, setMyRequests] = useState<LeaveRequestItem[]>([]);
   const [teamRequests, setTeamRequests] = useState<LeaveRequestItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -167,12 +115,12 @@ export default function LeaveScreen() {
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
+    return getLocalDateKey(d);
   });
   const [endDate, setEndDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
+    return getLocalDateKey(d);
   });
   const [isHalfDay, setIsHalfDay] = useState(false);
   const [halfDayType, setHalfDayType] = useState<'FIRST_HALF' | 'SECOND_HALF'>('FIRST_HALF');
@@ -214,9 +162,10 @@ export default function LeaveScreen() {
       if (typesRes?.success && Array.isArray(typesRes.data)) {
         setLeaveTypes(typesRes.data);
       }
+      const typesFailed = !typesRes?.success || !Array.isArray(typesRes.data);
 
-      // Safe Extraction for Balances
-      let extractedBalances: LeaveBalanceItem[] = [];
+      // Only replace cached balances after a successful API response.
+      let extractedBalances: LeaveBalanceItem[] | null = null;
       if (balancesRes?.success && balancesRes?.data) {
         if (Array.isArray(balancesRes.data)) {
           extractedBalances = balancesRes.data;
@@ -224,7 +173,7 @@ export default function LeaveScreen() {
           extractedBalances = balancesRes.data.balances;
         }
       }
-      setBalances(extractedBalances);
+      if (extractedBalances) setBalances(extractedBalances);
 
       // Safe Extraction for My Requests
       const myReqs = Array.isArray(myReqsRes?.data)
@@ -232,16 +181,25 @@ export default function LeaveScreen() {
         : Array.isArray(myReqsRes?.requests)
           ? myReqsRes.requests
           : [];
-      setMyRequests(myReqs);
+      const requestsFailed = !myReqsRes?.success || (!Array.isArray(myReqsRes.data) && !Array.isArray(myReqsRes.requests));
+      if (!requestsFailed) setMyRequests(myReqs);
 
+      let teamRequestsFailed = false;
       if (isHrOrAdmin) {
         const teamReqs = Array.isArray(allReqsRes?.data)
           ? allReqsRes.data
           : Array.isArray(allReqsRes?.requests)
             ? allReqsRes.requests
             : [];
-        setTeamRequests(teamReqs);
+        teamRequestsFailed = !allReqsRes?.success || (!Array.isArray(allReqsRes.data) && !Array.isArray(allReqsRes.requests));
+        if (!teamRequestsFailed) setTeamRequests(teamReqs);
       }
+      setLeaveDataErrors({
+        types: typesFailed,
+        balances: !extractedBalances,
+        requests: requestsFailed,
+        teamRequests: teamRequestsFailed,
+      });
     } catch (err) {
       console.error('Failed to load leave data:', err);
     } finally {
@@ -303,8 +261,11 @@ export default function LeaveScreen() {
   // Handle Apply Submission
   const handleApplyLeave = async () => {
     setFormError(null);
-    if (!selectedTypeId) {
-      setFormError('Please select a leave type.');
+    const selectedBalance = balances.find(
+      (balance) => getBalanceTypeId(balance) === activeLeaveTypeForForm?._id
+    );
+    if (!activeLeaveTypeForForm || !selectedBalance || (selectedBalance.available ?? 0) <= 0) {
+      setFormError('No active leave type with an allocated balance is available to you.');
       return;
     }
 
@@ -317,7 +278,7 @@ export default function LeaveScreen() {
       return;
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateKey();
     if (start < todayStr) {
       setFormError('Leave requests cannot be submitted for past dates.');
       return;
@@ -445,49 +406,18 @@ export default function LeaveScreen() {
     }
   };
 
-    // Comprehensive list of available leave types with corporate fallbacks
+  // Only active backend types with an existing positive employee allocation are applicable.
   const availableLeaveTypes = useMemo<LeaveTypeItem[]>(() => {
-    const list: LeaveTypeItem[] = [];
-    const seen = new Set<string>();
-
-    // 1. From leaveTypes state (fetched from backend)
-    for (const lt of leaveTypes) {
-      if (lt && (lt._id || lt.code)) {
-        const key = (lt.code || lt._id).toUpperCase();
-        if (!seen.has(key)) {
-          seen.add(key);
-          list.push(lt);
-        }
-      }
-    }
-
-    // 2. From balances state (in case types were embedded in balances)
-    const balList = Array.isArray(balances) ? balances : [];
-    for (const b of balList) {
-      if (b?.type && typeof b.type === 'object') {
-        const bType = b.type as LeaveTypeItem;
-        const code = (bType.code || 'LEAVE').toUpperCase();
-        if (!seen.has(code)) {
-          seen.add(code);
-          list.push({
-            _id: bType._id || code,
-            name: bType.name || code,
-            code,
-            paid: bType.paid ?? true,
-            annualQuota: b.allotted || 12,
-            halfDayAllowed: true,
-            isActive: true,
-          });
-        }
-      }
-    }
-
-    // 3. Fallback to standard corporate defaults if none loaded yet
-    if (list.length === 0) {
-      return DEFAULT_LEAVE_TYPES;
-    }
-
-    return list;
+    return leaveTypes.filter((leaveType) =>
+      leaveType.isActive && balances.some((balance) => {
+        const balanceTypeId = getBalanceTypeId(balance);
+        const available = balance.available ?? Math.max(
+          0,
+          balance.allotted + balance.carriedOver - balance.used - balance.pending
+        );
+        return balanceTypeId === leaveType._id && available > 0;
+      })
+    );
   }, [leaveTypes, balances]);
 
   // Synchronize default selected type
@@ -502,25 +432,16 @@ export default function LeaveScreen() {
     }
   }, [availableLeaveTypes, selectedTypeId]);
 
-  // Balances to display (safe fallback if backend balance list is empty)
+  // Render persisted allocations only; never infer an allocation from a leave type quota.
   const displayBalances = useMemo<LeaveBalanceItem[]>(() => {
-    const list = Array.isArray(balances) ? balances : [];
-    if (list.length > 0) return list;
-
-    return availableLeaveTypes.map((lt) => ({
-      id: lt._id,
-      _id: lt._id,
-      type: lt,
-      allotted: lt.annualQuota || 12,
-      used: 0,
-      pending: 0,
-      carriedOver: 0,
-      available: lt.annualQuota || 12,
-    }));
-  }, [balances, availableLeaveTypes]);
+    return balances;
+  }, [balances]);
 
   // Aggregated Balance Metrics
   const balanceMetrics = useMemo(() => {
+    if (displayBalances.length === 0) {
+      return { available: null, allotted: null, used: null, pending: null };
+    }
     let totalAllotted = 0;
     let totalUsed = 0;
     let totalPending = 0;
@@ -554,6 +475,20 @@ export default function LeaveScreen() {
     return availableLeaveTypes.find((t) => t._id === selectedTypeId || t.code === selectedTypeId);
   }, [availableLeaveTypes, selectedTypeId]);
 
+  const openApplyModal = () => {
+    if (availableLeaveTypes.length === 0) {
+      showToast({
+        title: 'No leave balance allocated',
+        message: 'There is no active leave type with an allocated balance available to you.',
+        type: 'warning',
+      });
+      return;
+    }
+    if (!selectedTypeId) setSelectedTypeId(availableLeaveTypes[0]._id);
+    setFormError(null);
+    setIsApplyModalOpen(true);
+  };
+
   return (
     <Screen
       refreshControl={
@@ -570,6 +505,13 @@ export default function LeaveScreen() {
       />
 
       <View style={[styles.container, isWide && styles.containerWide]}>
+        {(leaveDataErrors.types || leaveDataErrors.balances) && (
+          <Card variant="glass" padding={spacing.md} style={styles.emptyCard}>
+            <Text variant="small" color={colors.danger}>
+              Leave types or allocated balances could not be refreshed. Previously loaded records are retained; pull to retry.
+            </Text>
+          </Card>
+        )}
         {/* Navigation Tabs (Overview / My Requests / Team Review) */}
         <View style={styles.segmentWrapper}>
           <View style={styles.segmentedControl}>
@@ -660,12 +602,7 @@ export default function LeaveScreen() {
                   variant="primary"
                   fullWidth={false}
                   icon={<Plus size={14} color={colors.white} strokeWidth={2.4} />}
-                  onPress={() => {
-                    if (availableLeaveTypes.length > 0 && !selectedTypeId) {
-                      setSelectedTypeId(availableLeaveTypes[0]._id || availableLeaveTypes[0].code);
-                    }
-                    setIsApplyModalOpen(true);
-                  }}
+                  onPress={openApplyModal}
                   style={styles.applyTopBtn}
                 />
               </View>
@@ -673,8 +610,12 @@ export default function LeaveScreen() {
               {/* Numbers Row */}
               <View style={styles.metricsRow}>
                 <View style={styles.metricBox}>
-                  <Text variant="number" color={colors.success}>
-                    {balanceMetrics.available}
+                  <Text
+                    variant={balanceMetrics.available == null && !isWide ? 'numberSmall' : 'number'}
+                    color={colors.success}
+                    style={styles.metricValue}
+                  >
+                    {balanceMetrics.available ?? 'Not allocated'}
                   </Text>
                   <Text variant="small" color={colors.muted}>
                     Available
@@ -682,8 +623,12 @@ export default function LeaveScreen() {
                 </View>
                 <View style={styles.vDivider} />
                 <View style={styles.metricBox}>
-                  <Text variant="number" color={colors.info}>
-                    {balanceMetrics.used}
+                  <Text
+                    variant={balanceMetrics.used == null && !isWide ? 'numberSmall' : 'number'}
+                    color={colors.info}
+                    style={styles.metricValue}
+                  >
+                    {balanceMetrics.used ?? 'Not allocated'}
                   </Text>
                   <Text variant="small" color={colors.muted}>
                     Used
@@ -691,8 +636,12 @@ export default function LeaveScreen() {
                 </View>
                 <View style={styles.vDivider} />
                 <View style={styles.metricBox}>
-                  <Text variant="number" color={colors.warning}>
-                    {balanceMetrics.pending}
+                  <Text
+                    variant={balanceMetrics.pending == null && !isWide ? 'numberSmall' : 'number'}
+                    color={colors.warning}
+                    style={styles.metricValue}
+                  >
+                    {balanceMetrics.pending ?? 'Not allocated'}
                   </Text>
                   <Text variant="small" color={colors.muted}>
                     Pending
@@ -720,14 +669,25 @@ export default function LeaveScreen() {
                   </Card>
                 ))}
               </View>
+            ) : displayBalances.length === 0 && (leaveDataErrors.types || leaveDataErrors.balances) ? (
+              <Card variant="glass" padding={spacing.xl} style={styles.emptyCard}>
+                <AlertCircle size={36} color={colors.warning} strokeWidth={1.8} />
+                <Text variant="subheading" color={colors.text} style={styles.emptyTitle}>
+                  Unable to Load Leave Entitlements
+                </Text>
+                <Text variant="caption" color={colors.muted} style={styles.emptyDesc}>
+                  Retry when the leave service is available.
+                </Text>
+                <Button label="Retry" size="sm" variant="primary" fullWidth={false} onPress={onRefresh} />
+              </Card>
             ) : displayBalances.length === 0 ? (
               <Card variant="glass" padding={spacing.xl} style={styles.emptyCard}>
                 <CalendarCheck size={36} color={colors.indigoSoft} strokeWidth={1.8} />
                 <Text variant="subheading" color={colors.text} style={styles.emptyTitle}>
-                  No Leave Types Assigned
+                  No Leave Balance Allocated
                 </Text>
                 <Text variant="caption" color={colors.muted} style={styles.emptyDesc}>
-                  Your department quotas or leave rules will appear here once allocated by HR.
+                  Contact HR/Admin to allocate a balance for an active leave type.
                 </Text>
               </Card>
             ) : (
@@ -735,7 +695,7 @@ export default function LeaveScreen() {
                 {displayBalances.map((item, idx) => {
                   const typeObj = item.type;
                   const total = (item.allotted || 0) + (item.carriedOver || 0);
-                  const rem = Math.max(0, total - (item.used || 0) - (item.pending || 0));
+                  const rem = item.available ?? Math.max(0, total - (item.used || 0) - (item.pending || 0));
 
                   return (
                     <Card
@@ -828,6 +788,17 @@ export default function LeaveScreen() {
                   </Card>
                 ))}
               </View>
+            ) : leaveDataErrors.requests ? (
+              <Card variant="glass" padding={spacing.xl} style={styles.emptyCard}>
+                <AlertCircle size={36} color={colors.warning} strokeWidth={1.8} />
+                <Text variant="subheading" color={colors.text} style={styles.emptyTitle}>
+                  Unable to Load Leave Requests
+                </Text>
+                <Text variant="caption" color={colors.muted} style={styles.emptyDesc}>
+                  Your requests could not be verified. Retry to load them.
+                </Text>
+                <Button label="Retry" size="sm" variant="primary" fullWidth={false} onPress={onRefresh} />
+              </Card>
             ) : filteredMyRequests.length === 0 ? (
               <Card variant="glass" padding={spacing.xl} style={styles.emptyCard}>
                 <Clock size={36} color={colors.indigoSoft} strokeWidth={1.8} />
@@ -845,12 +816,7 @@ export default function LeaveScreen() {
                   variant="primary"
                   fullWidth={false}
                   icon={<Plus size={14} color={colors.white} strokeWidth={2.4} />}
-                  onPress={() => {
-                    if (availableLeaveTypes.length > 0 && !selectedTypeId) {
-                      setSelectedTypeId(availableLeaveTypes[0]._id || availableLeaveTypes[0].code);
-                    }
-                    setIsApplyModalOpen(true);
-                  }}
+                  onPress={openApplyModal}
                   style={styles.emptyActionBtn}
                 />
               </Card>
@@ -937,7 +903,15 @@ export default function LeaveScreen() {
               </Text>
             </View>
 
-            {pendingTeamRequests.length === 0 ? (
+            {leaveDataErrors.teamRequests ? (
+              <Card variant="glass" padding={spacing.xl} style={styles.emptyCard}>
+                <AlertCircle size={36} color={colors.warning} strokeWidth={1.8} />
+                <Text variant="subheading" color={colors.text} style={styles.emptyTitle}>
+                  Unable to Load Team Requests
+                </Text>
+                <Button label="Retry" size="sm" variant="primary" fullWidth={false} onPress={onRefresh} />
+              </Card>
+            ) : pendingTeamRequests.length === 0 ? (
               <Card variant="glass" padding={spacing.xl} style={styles.emptyCard}>
                 <CheckCircle2 size={36} color={colors.success} strokeWidth={1.8} />
                 <Text variant="subheading" color={colors.text} style={styles.emptyTitle}>
@@ -1045,8 +1019,16 @@ export default function LeaveScreen() {
         transparent
         onRequestClose={() => setIsApplyModalOpen(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <View style={[styles.modalOverlay, { padding: width < 360 ? spacing.sm : spacing.md }]}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                padding: width < 360 ? spacing.md : spacing.lg,
+                maxHeight: height * 0.92,
+              },
+            ]}
+          >
             <View style={styles.modalHeaderRow}>
               <View>
                 <Text variant="subheading" weight="bold">
@@ -1058,7 +1040,12 @@ export default function LeaveScreen() {
               </PressableScale>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formScroll}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={styles.formScrollView}
+              contentContainerStyle={styles.formScroll}
+            >
               {formError && (
                 <View style={styles.formErrorBox}>
                   <AlertCircle size={15} color={colors.danger} strokeWidth={2} />
@@ -1092,6 +1079,7 @@ export default function LeaveScreen() {
                         }}
                         style={[
                           styles.categoryChoiceCard,
+                          { width: width >= 600 ? '31%' : '48%' },
                           isSelected && styles.categoryChoiceCardSelected,
                         ]}
                       >
@@ -1124,7 +1112,6 @@ export default function LeaveScreen() {
                           variant="caption"
                           weight={isSelected ? 'bold' : 'medium'}
                           color={isSelected ? colors.white : colors.textSecondary}
-                          numberOfLines={1}
                           style={styles.choiceNameText}
                         >
                           {lt.name}
@@ -1158,7 +1145,13 @@ export default function LeaveScreen() {
                     <View style={styles.calendarIconBubble}>
                       <CalendarIcon size={16} color={colors.indigoSoft} strokeWidth={2.2} />
                     </View>
-                    <Text variant="body" weight="medium" color={colors.text}>
+                    <Text
+                      variant="body"
+                      weight="medium"
+                      color={colors.text}
+                      numberOfLines={2}
+                      style={{ flexShrink: 1 }}
+                    >
                       {formatDateDisplay(startDate)}
                     </Text>
                   </View>
@@ -1193,7 +1186,13 @@ export default function LeaveScreen() {
                       <View style={styles.calendarIconBubble}>
                         <CalendarIcon size={16} color={colors.indigoSoft} strokeWidth={2.2} />
                       </View>
-                      <Text variant="body" weight="medium" color={colors.text}>
+                      <Text
+                        variant="body"
+                        weight="medium"
+                        color={colors.text}
+                        numberOfLines={2}
+                        style={{ flexShrink: 1 }}
+                      >
                         {formatDateDisplay(endDate)}
                       </Text>
                     </View>
@@ -1463,11 +1462,19 @@ const styles = StyleSheet.create({
   metricsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
+    gap: spacing.xs,
     paddingTop: spacing.xs,
   },
   metricBox: {
+    flex: 1,
+    minWidth: 0,
     alignItems: 'center',
+  },
+  metricValue: {
+    width: '100%',
+    flexShrink: 1,
+    textAlign: 'center',
   },
   vDivider: {
     width: 1,
@@ -1524,12 +1531,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   typeCodeBadge: {
-    backgroundColor: 'rgba(89, 101, 242, 0.15)',
+    backgroundColor: 'rgba(20, 127, 181, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.3)',
+    borderColor: 'rgba(20, 127, 181, 0.3)',
   },
   typeCodeText: {
     color: colors.indigoSoft,
@@ -1569,7 +1576,7 @@ const styles = StyleSheet.create({
   },
   filterPillActive: {
     borderColor: colors.indigoSoft,
-    backgroundColor: 'rgba(89, 101, 242, 0.18)',
+    backgroundColor: 'rgba(20, 127, 181, 0.18)',
   },
   skeletonList: {
     paddingHorizontal: spacing.lg,
@@ -1647,7 +1654,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(89, 101, 242, 0.15)',
+    backgroundColor: 'rgba(20, 127, 181, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1672,7 +1679,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     maxHeight: '90%',
-    backgroundColor: '#0D101B',
+    backgroundColor: '#1D354B',
     borderRadius: radii.xxl,
     borderWidth: 1,
     borderColor: colors.borderActive,
@@ -1683,12 +1690,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.sm,
   },
   closeModalBtn: {
     padding: spacing.xs,
   },
   formScroll: {
     gap: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  formScrollView: {
+    flexShrink: 1,
   },
   formErrorBox: {
     flexDirection: 'row',
@@ -1718,8 +1730,9 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   categoryChoiceCard: {
-    flexGrow: 1,
-    flexBasis: '47%',
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
     backgroundColor: 'rgba(20, 23, 39, 0.75)',
     borderRadius: radii.md,
     borderWidth: 1,
@@ -1729,7 +1742,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   categoryChoiceCardSelected: {
-    backgroundColor: 'rgba(89, 101, 242, 0.18)',
+    backgroundColor: 'rgba(20, 127, 181, 0.18)',
     borderColor: colors.indigoSoft,
   },
   choiceCardHeader: {
@@ -1819,13 +1832,13 @@ const styles = StyleSheet.create({
   },
   halfDayOptionActive: {
     borderColor: colors.indigo,
-    backgroundColor: 'rgba(89, 101, 242, 0.22)',
+    backgroundColor: 'rgba(20, 127, 181, 0.22)',
   },
   estimateBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: 'rgba(89, 101, 242, 0.08)',
+    backgroundColor: 'rgba(20, 127, 181, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(140, 149, 255, 0.25)',
     borderRadius: radii.md,
@@ -1846,8 +1859,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 48,
+    minHeight: 48,
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
     borderRadius: radii.md,
     backgroundColor: 'rgba(17, 20, 34, 0.72)',
     borderWidth: 1,
@@ -1863,7 +1877,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(89, 101, 242, 0.15)',
+    backgroundColor: 'rgba(20, 127, 181, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1886,7 +1900,7 @@ const styles = StyleSheet.create({
   datePickerModalCard: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: '#0D101B',
+    backgroundColor: '#1D354B',
     borderRadius: radii.xl,
     padding: spacing.lg,
     borderWidth: 1,

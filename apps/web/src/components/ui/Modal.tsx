@@ -32,11 +32,13 @@ export const Modal: React.FC<ModalProps> = ({
   const { prefersReducedMotion } = useTheme();
 
   const previousActiveElement = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isOpen) {
-        onClose();
+        onCloseRef.current();
       }
     };
     if (isOpen) {
@@ -49,7 +51,7 @@ export const Modal: React.FC<ModalProps> = ({
       window.removeEventListener("keydown", handleKeyDown);
       previousActiveElement.current?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

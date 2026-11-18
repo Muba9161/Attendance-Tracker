@@ -19,6 +19,7 @@ export interface ButtonProps {
   loading?: boolean;
   disabled?: boolean;
   fullWidth?: boolean;
+  gradientColors?: readonly [string, string];
   style?: StyleProp<ViewStyle>;
   haptic?: boolean;
   accessibilityLabel?: string;
@@ -46,6 +47,7 @@ export function Button({
   loading = false,
   disabled = false,
   fullWidth = true,
+  gradientColors,
   style,
   haptic = true,
   accessibilityLabel,
@@ -123,7 +125,7 @@ export function Button({
     >
       {isPrimary ? (
         <LinearGradient
-          colors={gradients.primary}
+          colors={gradientColors ?? gradients.primary}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[StyleSheet.absoluteFill, { borderRadius: radiusFor(size) }]}
@@ -155,7 +157,7 @@ const styles = StyleSheet.create({
   },
   secondary: {
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderColor: 'rgba(184, 190, 255, 0.22)',
+    borderColor: 'rgba(184, 204, 214, 0.22)',
   },
   ghost: {
     backgroundColor: 'transparent',
@@ -167,7 +169,7 @@ const styles = StyleSheet.create({
   },
   soft: {
     backgroundColor: colors.surfaceSoft,
-    borderColor: 'rgba(184, 190, 255, 0.1)',
+    borderColor: 'rgba(184, 204, 214, 0.1)',
   },
   content: {
     flexDirection: 'row',

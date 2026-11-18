@@ -1,7 +1,9 @@
 import mongoose, { Types } from "mongoose";
 import { Employee, IEmployee } from "../models/Employee";
+import { AttendancePolicy } from "../models/AttendancePolicy";
 import { User } from "../models/User";
 import { AuditEvent } from "../models/AuditEvent";
+import { reauthorizeUserSockets } from "../sockets/socketServer";
 import { AppError } from "../utils/AppError";
 import { ApiErrorCode, EmployeeCreate, EmployeeUpdate, EmployeeFilterQuery } from "@vorldx/shared";
 
@@ -24,6 +26,26 @@ export interface ActorContext {
 }
 
 export class EmployeeService {
+  private async validateShiftId(shiftId?: string | null): Promise<void> {
+    if (!shiftId) return;
+
+    if (!Types.ObjectId.isValid(shiftId)) {
+      throw AppError.badRequest("Shift ID is invalid", ApiErrorCode.ERR_INVALID_INPUT);
+    }
+
+    const activePolicy = await AttendancePolicy.findOne({
+      isDefault: true,
+      "shifts._id": new Types.ObjectId(shiftId),
+    }).select("_id");
+
+    if (!activePolicy) {
+      throw AppError.badRequest(
+        "Selected shift does not exist in the active attendance policy",
+        ApiErrorCode.ERR_INVALID_INPUT
+      );
+    }
+  }
+
   /**
    * Retrieves paginated employee roster with multi-column search, filtering, and sorting
    */
@@ -132,12 +154,27 @@ export class EmployeeService {
     return employee;
   }
 
+  /** Resolves the signed-in employee through the persistent User relationship. */
+  public async getEmployeeForUser(userId: string, employeeIdFallback: string): Promise<IEmployee> {
+    if (Types.ObjectId.isValid(userId)) {
+      const employee = await Employee.findOne({ userId: new Types.ObjectId(userId) }).populate(
+        "userId",
+        "role status lastLoginAt"
+      );
+      if (employee) return employee;
+    }
+
+    // Keep compatibility with older accounts whose Employee.userId was not linked.
+    return this.getEmployeeById(employeeIdFallback);
+  }
+
   /**
    * Onboards a new employee with duplicate prevention and audit trail logging
    */
   public async createEmployee(data: EmployeeCreate, actor: ActorContext): Promise<IEmployee> {
     const normalizedEmployeeId = data.employeeId.trim().toUpperCase();
     const normalizedEmail = data.email.trim().toLowerCase();
+    await this.validateShiftId(data.shiftId);
 
     // Prevent duplicate Employee ID
     const existingId = await Employee.findOne({ employeeId: normalizedEmployeeId });
@@ -196,6 +233,11 @@ export class EmployeeService {
   ): Promise<IEmployee> {
     const employee = await this.getEmployeeById(idOrEmployeeId);
     const beforeState = employee.toObject();
+    if (data.shiftId !== undefined) await this.validateShiftId(data.shiftId);
+    const employeeLink = await Employee.findById(employee._id).select("userId").lean();
+    const linkedUser = employeeLink?.userId
+      ? await User.findById(employeeLink.userId)
+      : await User.findOne({ employeeId: employee.employeeId });
 
     // Check Employee ID uniqueness if being modified
     if (data.employeeId) {
@@ -208,6 +250,16 @@ export class EmployeeService {
         if (conflict) {
           throw AppError.conflict(
             `Employee ID '${newEmployeeId}' is already in use by another record`,
+            ApiErrorCode.ERR_BAD_REQUEST
+          );
+        }
+        const userConflict = await User.findOne({
+          employeeId: newEmployeeId,
+          ...(linkedUser ? { _id: { $ne: linkedUser._id } } : {}),
+        });
+        if (userConflict) {
+          throw AppError.conflict(
+            `Employee ID '${newEmployeeId}' is already assigned to a user account`,
             ApiErrorCode.ERR_BAD_REQUEST
           );
         }
@@ -229,6 +281,16 @@ export class EmployeeService {
             ApiErrorCode.ERR_BAD_REQUEST
           );
         }
+        const userConflict = await User.findOne({
+          email: newEmail,
+          ...(linkedUser ? { _id: { $ne: linkedUser._id } } : {}),
+        });
+        if (userConflict) {
+          throw AppError.conflict(
+            `Email address '${newEmail}' is already assigned to a user account`,
+            ApiErrorCode.ERR_BAD_REQUEST
+          );
+        }
         employee.email = newEmail;
       }
     }
@@ -242,21 +304,36 @@ export class EmployeeService {
     }
     if (data.joiningDate !== undefined) employee.joiningDate = data.joiningDate;
 
-    await employee.save();
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        if (linkedUser) {
+          linkedUser.employeeId = employee.employeeId;
+          linkedUser.email = employee.email;
+          await linkedUser.save({ session });
+        }
+        await employee.save({ session });
 
-    // Write immutable AuditEvent
-    await AuditEvent.create({
-      entityType: "EMPLOYEE",
-      entityId: employee._id.toString(),
-      performedBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
-      performedByEmployeeId: actor.employeeId,
-      action: "UPDATE",
-      previousValue: beforeState,
-      newValue: employee.toObject(),
-      reason: "Employee profile details updated",
-      timestamp: new Date(),
-      metadata: { actorRole: actor.role },
-    });
+        // Keep the employee, linked login identity, and audit event consistent.
+        await AuditEvent.create(
+          [{
+            entityType: "EMPLOYEE",
+            entityId: employee._id.toString(),
+            performedBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
+            performedByEmployeeId: actor.employeeId,
+            action: "UPDATE",
+            previousValue: beforeState,
+            newValue: employee.toObject(),
+            reason: "Employee profile details updated",
+            timestamp: new Date(),
+            metadata: { actorRole: actor.role },
+          }],
+          { session }
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
 
     return employee;
   }
@@ -280,13 +357,15 @@ export class EmployeeService {
 
     if (!isActive) {
       // Deactivating: immediately revoke refresh tokens and disable login access
+      const userFilter = {
+        $or: [
+          ...(employee.userId ? [{ _id: employee.userId }] : []),
+          { employeeId: employee.employeeId },
+        ],
+      };
+      const affectedUsers = await User.find(userFilter).select("_id");
       await User.updateMany(
-        {
-          $or: [
-            ...(employee.userId ? [{ _id: employee.userId }] : []),
-            { employeeId: employee.employeeId },
-          ],
-        },
+        userFilter,
         {
           $set: {
             status: "INACTIVE",
@@ -294,6 +373,7 @@ export class EmployeeService {
           },
         }
       );
+      await reauthorizeUserSockets(affectedUsers.map((user) => user._id.toString()));
     } else {
       // Reactivating: restore active status on User account if registered
       await User.updateMany(

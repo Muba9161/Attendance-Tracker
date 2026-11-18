@@ -9,6 +9,7 @@ import {
 import { policyService } from "./policy.service";
 import { calendarService } from "./calendar.service";
 import { eventEmitterService } from "./eventEmitter.service";
+import { notifyHrUsersOnce } from "./notification.service";
 import { AppError } from "../utils/AppError";
 import {
   ApiErrorCode,
@@ -260,6 +261,15 @@ export async function createWfhRequest(
     existingRequest.reviewedAt = undefined;
     await existingRequest.save();
 
+    const requestEventId = `wfh-request:${existingRequest._id}:${existingRequest.updatedAt.getTime()}`;
+    await notifyHrUsersOnce({
+      eventId: requestEventId,
+      type: "WFH_STATUS",
+      title: "New WFH Request",
+      message: `${employee.name} requested WFH for ${existingRequest.dateKey}.`,
+      payload: { requestId: existingRequest._id.toString(), eventId: requestEventId, status: "PENDING" },
+    });
+
     await AuditEvent.create({
       entityType: "WFH_REQUEST",
       entityId: existingRequest._id.toString(),
@@ -275,6 +285,7 @@ export async function createWfhRequest(
 
     eventEmitterService.emitWfhCreated({
       requestId: existingRequest._id.toString(),
+      eventId: requestEventId,
       employeeId: employee.employeeId,
       employeeName: employee.name,
       department: employee.department,
@@ -297,6 +308,15 @@ export async function createWfhRequest(
     status: WfhStatus.PENDING,
   });
 
+  const requestEventId = `wfh-request:${wfh._id}:${wfh.createdAt.getTime()}`;
+  await notifyHrUsersOnce({
+    eventId: requestEventId,
+    type: "WFH_STATUS",
+    title: "New WFH Request",
+    message: `${employee.name} requested WFH for ${wfh.dateKey}.`,
+    payload: { requestId: wfh._id.toString(), eventId: requestEventId, status: "PENDING" },
+  });
+
   await AuditEvent.create({
     entityType: "WFH_REQUEST",
     entityId: wfh._id.toString(),
@@ -315,6 +335,7 @@ export async function createWfhRequest(
 
   eventEmitterService.emitWfhCreated({
     requestId: wfh._id.toString(),
+    eventId: requestEventId,
     employeeId: employee.employeeId,
     employeeName: employee.name,
     department: employee.department,
@@ -335,6 +356,8 @@ export async function listMyWfhRequests(
   query: {
     status?: string;
     month?: string;
+    startDate?: string;
+    endDate?: string;
     page?: number;
     limit?: number;
   }
@@ -354,9 +377,15 @@ export async function listMyWfhRequests(
     filter.status = query.status;
   }
 
-  if (query.month) {
-    filter.dateKey = new RegExp(`^${query.month}`);
+  const dateConditions: Record<string, unknown>[] = [];
+  if (query.month) dateConditions.push({ dateKey: new RegExp(`^${query.month}`) });
+  if (query.startDate || query.endDate) {
+    dateConditions.push({ dateKey: {
+      ...(query.startDate ? { $gte: query.startDate } : {}),
+      ...(query.endDate ? { $lte: query.endDate } : {}),
+    } });
   }
+  if (dateConditions.length) filter.$and = dateConditions;
 
   const [requests, total] = await Promise.all([
     WfhRequest.find(filter).sort({ dateKey: -1 }).skip(skip).limit(limit),
@@ -454,9 +483,17 @@ export async function listAllWfhRequests(query: WfhFilterQuery): Promise<WfhList
     filter.department = query.department;
   }
 
-  if (query.month) {
-    filter.dateKey = new RegExp(`^${query.month}`);
+  const dateConditions: Record<string, unknown>[] = [];
+  if (query.month) dateConditions.push({ dateKey: new RegExp(`^${query.month}`) });
+  if (query.startDate || query.endDate) {
+    dateConditions.push({
+      dateKey: {
+        ...(query.startDate ? { $gte: query.startDate } : {}),
+        ...(query.endDate ? { $lte: query.endDate } : {}),
+      },
+    });
   }
+  if (dateConditions.length) filter.$and = dateConditions;
 
   if (query.search) {
     const searchRegex = new RegExp(query.search, "i");
@@ -517,6 +554,31 @@ export async function reviewWfhRequest(
 
   const adminUserId = new Types.ObjectId(actor.userId);
   const now = new Date();
+
+  // A request can be submitted before an employee later punches in at the
+  // office. Do not let a subsequent approval overwrite that real attendance.
+  if (review.status === WfhStatus.APPROVED) {
+    const pendingRequest = await WfhRequest.findOne({
+      _id: new Types.ObjectId(requestId),
+      status: WfhStatus.PENDING,
+    });
+
+    if (pendingRequest) {
+      const officeAttendance = await AttendanceRecord.findOne({
+        employee: pendingRequest.employee,
+        dateKey: pendingRequest.dateKey,
+        $or: [{ checkInTime: { $ne: null } }, { checkOutTime: { $ne: null } }],
+      });
+
+      if (officeAttendance) {
+        throw new AppError(
+          409,
+          ApiErrorCode.ERR_BAD_REQUEST,
+          "Cannot approve this WFH request because office attendance has already been recorded for that date."
+        );
+      }
+    }
+  }
 
   // ATOMIC DECISION: Only transition from PENDING -> double decisions are prevented
   const updatedRequest = await WfhRequest.findOneAndUpdate(

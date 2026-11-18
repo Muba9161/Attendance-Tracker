@@ -124,7 +124,7 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
-  if ((isSummaryError && !summaryData) || (isAnalyticsError && !liveAnalytics)) {
+  if ((isSummaryError && !summaryData) && (isAnalyticsError && !liveAnalytics)) {
     const errorMsg =
       analyticsError instanceof Error
         ? analyticsError.message
@@ -166,16 +166,18 @@ export const DashboardPage: React.FC = () => {
       ? Math.round(((statusSplit.present + statusSplit.wfh) / statusSplit.totalActive) * 100)
       : summaryData?.summary?.attendanceRate || 0;
 
+  const dashboardPartialError = isSummaryError || isAnalyticsError;
+
   return (
     <div className="space-y-6">
       {/* Page Title & Status Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="w-full sm:w-auto min-w-0 text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
               Executive Dashboard & Live Analytics
             </h1>
-            <Badge variant="info" size="md">
+            <Badge variant="info" size="md" className="shrink-0 whitespace-nowrap">
               {dateKey}
             </Badge>
             {isSocketConnected && (
@@ -184,7 +186,7 @@ export const DashboardPage: React.FC = () => {
                 LIVE STREAM
               </span>
             )}
-            <HROnlineIndicator variant="compact" />
+            <HROnlineIndicator variant="compact" className="shrink-0 whitespace-nowrap" />
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Real-time workforce attendance metrics, dynamic QR scan activity, and compliance trends.
@@ -219,6 +221,16 @@ export const DashboardPage: React.FC = () => {
       {/* Live Announcement & Alert Block */}
       <AnnouncementDashboardBlock />
 
+      {dashboardPartialError && (
+        <ErrorState
+          title="Some dashboard data could not be refreshed"
+          message={`${isSummaryError ? "Dashboard summary" : ""}${isSummaryError && isAnalyticsError ? " and " : ""}${isAnalyticsError ? "live analytics" : ""} request failed. Available sections retain their last successful data.`}
+          onRetry={handleSyncAll}
+          isRetrying={isSummaryFetching || isAnalyticsFetching}
+          className="p-4"
+        />
+      )}
+
       {/* 6 Key Animated Metric Cards with Click-Through and Authentic Trends */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard
@@ -240,8 +252,8 @@ export const DashboardPage: React.FC = () => {
         />
         <StatCard
           label="Late Arrivals"
-          value={<AnimatedCounter value={statusSplit.late} firstLoadOnly />}
-          subtext={`${statusSplit.percentages.late}% beyond grace`}
+          value={liveAnalytics ? <AnimatedCounter value={statusSplit.late} firstLoadOnly /> : "—"}
+          subtext={liveAnalytics ? `${statusSplit.percentages.late}% beyond grace` : "Analytics unavailable"}
           icon={ClockAlert}
           variant="amber"
           to={`/attendance?status=LATE&dateKey=${dateKey}`}
@@ -258,7 +270,7 @@ export const DashboardPage: React.FC = () => {
         />
         <StatCard
           label="On Leave"
-          value={<AnimatedCounter value={statusSplit.leave} firstLoadOnly />}
+          value={liveAnalytics ? <AnimatedCounter value={statusSplit.leave} firstLoadOnly /> : "—"}
           subtext="Approved time-off"
           icon={CalendarDays}
           variant="purple"
