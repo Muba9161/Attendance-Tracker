@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   useWfhRequests,
   useReviewWfhRequest,
@@ -15,8 +15,11 @@ import { Modal } from "../components/ui/Modal";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import { useSocket } from "../context/SocketContext";
+import { decisionToastEventKey } from "../utils/recentEventDedupe";
+import { tryAcquireActionLock } from "../utils/actionLock";
 import {
   Home,
   Check,
@@ -72,6 +75,9 @@ export const WfhPage: React.FC = () => {
   const {
     data: response,
     isLoading,
+    isError,
+    error,
+    isFetching,
     refetch,
   } = useWfhRequests(filters);
 
@@ -79,6 +85,7 @@ export const WfhPage: React.FC = () => {
   const pagination = response?.pagination || { total: 0, page: 1, limit: 10, totalPages: 1 };
 
   const reviewMutation = useReviewWfhRequest();
+  const reviewSubmittingRef = useRef(false);
 
   // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -93,6 +100,7 @@ export const WfhPage: React.FC = () => {
   const [reviewAction, setReviewAction] = useState<"APPROVED" | "REJECTED">("APPROVED");
   const [reviewerRemarks, setReviewerRemarks] = useState("");
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const closeReviewModal = useCallback(() => setShowReviewModal(false), []);
 
   // Pending requests on the current page
   const pendingRequests = requests.filter((r) => r.status === "PENDING");
@@ -127,11 +135,6 @@ export const WfhPage: React.FC = () => {
       setPulsingRowId(payload.requestId);
       setTimeout(() => setPulsingRowId(null), 3000);
 
-      toast({
-        title: "New WFH Request",
-        description: `${payload.employeeName || "An employee"} requested WFH for ${payload.dateKey}.`,
-        type: "info",
-      });
     };
 
     const handleWfhDecided = (payload: {
@@ -150,7 +153,7 @@ export const WfhPage: React.FC = () => {
       socket.off("wfh.created", handleWfhCreated);
       socket.off("wfh.decided", handleWfhDecided);
     };
-  }, [socket, refetch, toast]);
+  }, [socket, refetch]);
 
   const handleOpenReview = (
     request: WfhRequestItem,
@@ -165,7 +168,7 @@ export const WfhPage: React.FC = () => {
   };
 
   const handleConfirmReview = async () => {
-    if (!selectedRequest) return;
+    if (!selectedRequest || !tryAcquireActionLock(reviewSubmittingRef)) return;
     try {
       await reviewMutation.mutateAsync({
         id: selectedRequest._id,
@@ -176,7 +179,8 @@ export const WfhPage: React.FC = () => {
       toast({
         title: reviewAction === "APPROVED" ? "Request Approved" : "Request Rejected",
         description: `WFH for ${selectedRequest.employeeId} on ${selectedRequest.dateKey} marked as ${reviewAction}.`,
-        type: reviewAction === "APPROVED" ? "success" : "info",
+        type: "success",
+        dedupeKey: decisionToastEventKey("wfh", selectedRequest._id, reviewAction),
       });
 
       setShowReviewModal(false);
@@ -192,6 +196,8 @@ export const WfhPage: React.FC = () => {
         description: message,
         type: "error",
       });
+    } finally {
+      reviewSubmittingRef.current = false;
     }
   };
 
@@ -378,6 +384,10 @@ export const WfhPage: React.FC = () => {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
+        ) : isError && !response ? (
+          <ErrorState title="Unable to load WFH requests"
+            message={error instanceof Error ? error.message : "The WFH request failed."}
+            onRetry={() => void refetch()} isRetrying={isFetching} />
         ) : requests.length === 0 ? (
           <EmptyState
             icon={<Home className="w-6 h-6 text-slate-400" />}
@@ -385,6 +395,10 @@ export const WfhPage: React.FC = () => {
             description="There are no remote work requests matching your selected status and filter criteria."
           />
         ) : (
+          <>
+          {isError && <ErrorState title="WFH refresh failed"
+            message={error instanceof Error ? error.message : "Showing the last successfully loaded requests."}
+            onRetry={() => void refetch()} isRetrying={isFetching} className="m-4 p-3" />}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -537,6 +551,7 @@ export const WfhPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         {/* Pagination Toolbar */}
@@ -685,7 +700,7 @@ export const WfhPage: React.FC = () => {
       {/* ======================================================== */}
       <Modal
         isOpen={showReviewModal}
-        onClose={() => setShowReviewModal(false)}
+        onClose={closeReviewModal}
         title={reviewAction === "APPROVED" ? "Approve WFH Request" : "Reject WFH Request"}
         maxWidth="md"
       >
@@ -700,6 +715,7 @@ export const WfhPage: React.FC = () => {
               Reviewer Remarks / Reason (Optional)
             </label>
             <Input
+              autoFocus
               value={reviewerRemarks}
               onChange={(e) => setReviewerRemarks(e.target.value)}
               placeholder="e.g. Approved under monthly quota allowance"
@@ -712,7 +728,7 @@ export const WfhPage: React.FC = () => {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setShowReviewModal(false)}
+              onClick={closeReviewModal}
             >
               Cancel
             </Button>

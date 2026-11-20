@@ -3,9 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Search,
   RotateCw,
-  Edit3,
   History,
-  AlertCircle,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -15,13 +13,14 @@ import {
   Calendar,
   CheckCircle2,
   Info,
+  Edit3,
 } from "lucide-react";
 import {
   useAttendanceRecords,
   useCorrectAttendanceRecord,
+  useLiveAnalytics,
   AttendanceRecordItem,
   AttendanceFilters,
-  AttendanceCorrectionPayload,
 } from "../api/queries";
 import { useSocket } from "../context/SocketContext";
 import { Card } from "../components/ui/Card";
@@ -29,39 +28,48 @@ import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Drawer } from "../components/ui/Drawer";
 import { Modal } from "../components/ui/Modal";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { Input } from "../components/ui/Input";
+import { Select } from "../components/ui/Select";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import { AttendanceStatus } from "@vorldx/shared";
+import { useAuth } from "../context/AuthContext";
+import { canCorrectAttendance } from "../utils/attendanceCorrectionAccess";
+import { useActivePolicy } from "../api/queries";
 
-const DEPARTMENTS = [
-  "Engineering",
-  "Product",
-  "Operations",
-  "Marketing",
-  "HR",
-  "Executive",
-  "Finance",
-  "Design",
-];
-
-// Helper to convert ISO string to datetime-local input string (YYYY-MM-DDTHH:mm)
-function toDatetimeLocal(isoString?: string | null): string {
-  if (!isoString) return "";
-  const d = new Date(isoString);
-  if (isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+const dateKeyInTimezone = (timezone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
 
 export const AttendanceLedgerPage: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const { success, info } = useToast();
+  const { info, success } = useToast();
+  const { user } = useAuth();
   const { socket } = useSocket();
+  const { data: attendancePolicy } = useActivePolicy();
+  const canCorrect = canCorrectAttendance(user?.role);
 
   const prefilledEmployeeId = searchParams.get("employeeId") || "";
   const prefilledStatus = searchParams.get("status") as AttendanceStatus | undefined;
-  const prefilledDateKey = searchParams.get("dateKey") || new Date().toISOString().slice(0, 10);
+  const defaultDateKey = dateKeyInTimezone(attendancePolicy?.timezone || "Asia/Kolkata");
+  const prefilledDateKey = searchParams.get("dateKey") || defaultDateKey;
+  const {
+    data: liveAnalytics,
+    isLoading: departmentsLoading,
+    isError: departmentsError,
+    refetch: refetchDepartments,
+  } = useLiveAnalytics({ dateKey: prefilledDateKey });
+  const departments = useMemo(
+    () => (liveAnalytics?.departmentBreakdown || []).map((item) => item.department).filter(Boolean),
+    [liveAnalytics?.departmentBreakdown]
+  );
 
   // 1. Ledger Filter State
   const [filters, setFilters] = useState<AttendanceFilters>({
@@ -97,18 +105,28 @@ export const AttendanceLedgerPage: React.FC = () => {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const timezone = attendancePolicy?.timezone;
+    if (!timezone || searchParams.get("dateKey")) return;
+    const policyDateKey = dateKeyInTimezone(timezone);
+    setFilters((previous) => previous.dateKey === dateKeyInTimezone("Asia/Kolkata")
+      ? { ...previous, dateKey: policyDateKey, page: 1 }
+      : previous);
+  }, [attendancePolicy?.timezone, searchParams]);
+
   // 2. Row Details Drawer State
   const [detailRecord, setDetailRecord] = useState<AttendanceRecordItem | null>(null);
 
-  // 3. Correction Dialog State
   const [correctingRecord, setCorrectingRecord] = useState<AttendanceRecordItem | null>(null);
-  const [newStatus, setNewStatus] = useState<AttendanceStatus | "">("");
+  const [newStatus, setNewStatus] = useState<AttendanceStatus>(AttendanceStatus.PRESENT);
   const [newCheckInTime, setNewCheckInTime] = useState("");
   const [newCheckOutTime, setNewCheckOutTime] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
   const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [showCorrectionConfirm, setShowCorrectionConfirm] = useState(false);
+  const correctMutation = useCorrectAttendanceRecord();
 
-  // 4. Correction History Dialog State
+  // Read-only correction history state
   const [historyRecord, setHistoryRecord] = useState<AttendanceRecordItem | null>(null);
 
   // 5. Data Query & Mutation
@@ -116,10 +134,79 @@ export const AttendanceLedgerPage: React.FC = () => {
     data: attendanceData,
     isLoading,
     isFetching,
+    isError,
+    error,
     refetch,
   } = useAttendanceRecords(filters);
 
-  const correctMutation = useCorrectAttendanceRecord();
+  const correctionStatusOptions = useMemo(() => [
+    AttendanceStatus.PRESENT,
+    AttendanceStatus.LATE,
+    AttendanceStatus.HALF_DAY,
+    AttendanceStatus.CHECKED_OUT,
+    AttendanceStatus.ABSENT,
+    AttendanceStatus.INCOMPLETE,
+  ], []);
+
+  const toDatetimeLocal = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    const pad = (part: number) => String(part).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
+  const openCorrection = (record: AttendanceRecordItem, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    setCorrectingRecord(record);
+    setNewStatus(record.status);
+    setNewCheckInTime(toDatetimeLocal(record.checkInTime));
+    setNewCheckOutTime(toDatetimeLocal(record.checkOutTime));
+    setCorrectionReason("");
+    setCorrectionError(null);
+    setShowCorrectionConfirm(false);
+  };
+
+  const requestCorrectionConfirmation = () => {
+    setCorrectionError(null);
+    if (!correctionReason.trim() || correctionReason.trim().length < 5) {
+      setCorrectionError("A correction reason of at least 5 characters is required.");
+      return;
+    }
+    const checkIn = newCheckInTime ? new Date(newCheckInTime) : null;
+    const checkOut = newCheckOutTime ? new Date(newCheckOutTime) : null;
+    if ((checkIn && !Number.isFinite(checkIn.getTime())) || (checkOut && !Number.isFinite(checkOut.getTime()))) {
+      setCorrectionError("Enter valid check-in and check-out times.");
+      return;
+    }
+    if (checkOut && (!checkIn || checkOut.getTime() <= checkIn.getTime())) {
+      setCorrectionError("Check-out must be after check-in.");
+      return;
+    }
+    setShowCorrectionConfirm(true);
+  };
+
+  const applyCorrection = async () => {
+    if (!correctingRecord || !canCorrect || correctMutation.isPending) return;
+    try {
+      await correctMutation.mutateAsync({
+        id: correctingRecord._id,
+        payload: {
+          checkInTime: newCheckInTime ? new Date(newCheckInTime).toISOString() : null,
+          checkOutTime: newCheckOutTime ? new Date(newCheckOutTime).toISOString() : null,
+          status: newStatus,
+          reason: correctionReason.trim(),
+        },
+      });
+      success("Correction Applied", `Attendance for ${correctingRecord.employeeId} on ${correctingRecord.dateKey} was corrected and audited.`);
+      setShowCorrectionConfirm(false);
+      setCorrectingRecord(null);
+      if (detailRecord?._id === correctingRecord._id) setDetailRecord(null);
+    } catch (error) {
+      setShowCorrectionConfirm(false);
+      setCorrectionError(error instanceof Error ? error.message : "Failed to apply attendance correction.");
+    }
+  };
 
   // 6. Real-Time Socket Listener for live row updates
   useEffect(() => {
@@ -147,78 +234,6 @@ export const AttendanceLedgerPage: React.FC = () => {
       socket.off("attendance.updated", handleAttendanceUpdated);
     };
   }, [socket, refetch, info]);
-
-  // Handle Opening the Correction Dialog
-  const handleOpenCorrection = (record: AttendanceRecordItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setCorrectingRecord(record);
-    setNewStatus(record.status);
-    setNewCheckInTime(toDatetimeLocal(record.checkInTime));
-    setNewCheckOutTime(toDatetimeLocal(record.checkOutTime));
-    setCorrectionReason("");
-    setCorrectionError(null);
-  };
-
-  // Compute Projected Duration in minutes
-  const projectedDurationMinutes = useMemo(() => {
-    if (!newCheckInTime || !newCheckOutTime) {
-      if (newStatus === AttendanceStatus.WFH_APPROVED) return 480;
-      return 0;
-    }
-    const inDate = new Date(newCheckInTime).getTime();
-    const outDate = new Date(newCheckOutTime).getTime();
-    if (isNaN(inDate) || isNaN(outDate) || outDate <= inDate) return 0;
-    return Math.round((outDate - inDate) / (1000 * 60));
-  }, [newCheckInTime, newCheckOutTime, newStatus]);
-
-  // Submit Administrative Correction
-  const handleSubmitCorrection = async () => {
-    if (!correctingRecord) return;
-    setCorrectionError(null);
-
-    // Validation 1: Mandatory reason min 5 characters
-    if (!correctionReason.trim() || correctionReason.trim().length < 5) {
-      setCorrectionError("A justification reason of at least 5 characters is mandatory.");
-      return;
-    }
-
-    // Validation 2: Check-out after check-in
-    if (newCheckInTime && newCheckOutTime) {
-      const inDate = new Date(newCheckInTime).getTime();
-      const outDate = new Date(newCheckOutTime).getTime();
-      if (outDate <= inDate) {
-        setCorrectionError("Check-out time must be strictly after check-in time.");
-        return;
-      }
-    }
-
-    try {
-      const payload: AttendanceCorrectionPayload = {
-        reason: correctionReason.trim(),
-        status: newStatus ? (newStatus as AttendanceStatus) : undefined,
-        checkInTime: newCheckInTime ? new Date(newCheckInTime).toISOString() : null,
-        checkOutTime: newCheckOutTime ? new Date(newCheckOutTime).toISOString() : null,
-      };
-
-      await correctMutation.mutateAsync({
-        id: correctingRecord._id,
-        payload,
-      });
-
-      success(
-        "Correction Applied",
-        `Attendance record for ${correctingRecord.employeeId} on ${correctingRecord.dateKey} was updated and audited.`
-      );
-
-      setCorrectingRecord(null);
-      if (detailRecord?._id === correctingRecord._id) {
-        setDetailRecord(null);
-      }
-    } catch (err: unknown) {
-      const errorObj = err as { message?: string };
-      setCorrectionError(errorObj.message || "Failed to apply attendance correction.");
-    }
-  };
 
   // Sorting
   const handleSort = (field: "dateKey" | "createdAt" | "employeeId" | "status") => {
@@ -332,6 +347,7 @@ export const AttendanceLedgerPage: React.FC = () => {
           <div>
             <select
               value={filters.department || ""}
+              disabled={departmentsLoading || departmentsError}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, department: e.target.value, page: 1 }))
               }
@@ -339,12 +355,18 @@ export const AttendanceLedgerPage: React.FC = () => {
               className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
             >
               <option value="">All Departments</option>
-              {DEPARTMENTS.map((dept) => (
+              {departments.map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}
                 </option>
               ))}
             </select>
+            {departmentsError ? (
+              <div className="mt-1 flex items-center gap-2 text-xs text-rose-600">
+                <span>Departments could not be loaded.</span>
+                <button type="button" className="underline" onClick={() => void refetchDepartments()}>Retry</button>
+              </div>
+            ) : null}
           </div>
 
           {/* Status Filter */}
@@ -416,6 +438,12 @@ export const AttendanceLedgerPage: React.FC = () => {
           )}
         </div>
       </Card>
+
+      {isError && attendanceData && (
+        <ErrorState title="Attendance refresh failed"
+          message={error instanceof Error ? error.message : "Showing the last successfully loaded records."}
+          onRetry={() => void refetch()} isRetrying={isFetching} className="p-4" />
+      )}
 
       {/* Ledger Table Card */}
       <Card className="border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs bg-white dark:bg-slate-900">
@@ -508,6 +536,14 @@ export const AttendanceLedgerPage: React.FC = () => {
                     </td>
                   </tr>
                 ))
+              ) : isError && !attendanceData ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-8">
+                    <ErrorState title="Unable to load attendance records"
+                      message={error instanceof Error ? error.message : "The attendance request failed."}
+                      onRetry={() => void refetch()} isRetrying={isFetching} />
+                  </td>
+                </tr>
               ) : records.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center">
@@ -635,6 +671,7 @@ export const AttendanceLedgerPage: React.FC = () => {
                           >
                             {rec.status}
                           </Badge>
+                          {rec.isEarlyCheckout && <Badge variant="warning" size="sm">Early Checkout</Badge>}
 
                           {rec.isManuallyCorrected && (
                             <span
@@ -654,16 +691,19 @@ export const AttendanceLedgerPage: React.FC = () => {
                       {/* Actions */}
                       <td className="px-6 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => handleOpenCorrection(rec, e)}
-                            className="p-1.5 h-8 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                            title="Correct Attendance Record"
-                          >
-                            <Edit3 className="w-4 h-4 mr-1" />
-                            <span>Correct</span>
-                          </Button>
+
+                          {canCorrect && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => openCorrection(rec, e)}
+                              className="p-1.5 h-8 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                              title="Correct Attendance Record"
+                            >
+                              <Edit3 className="w-4 h-4 mr-1" />
+                              <span>Correct</span>
+                            </Button>
+                          )}
 
                           {rec.corrections && rec.corrections.length > 0 && (
                             <Button
@@ -764,15 +804,6 @@ export const AttendanceLedgerPage: React.FC = () => {
             >
               Close
             </Button>
-            {detailRecord && (
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => handleOpenCorrection(detailRecord)}
-              >
-                Correct Punch
-              </Button>
-            )}
           </div>
         }
       >
@@ -862,6 +893,16 @@ export const AttendanceLedgerPage: React.FC = () => {
               </div>
             </div>
 
+            {detailRecord.isEarlyCheckout && (
+              <div className="rounded-xl border border-amber-300/40 bg-amber-50/70 dark:bg-amber-950/30 p-4 space-y-2 text-sm">
+                <div className="font-semibold text-amber-800 dark:text-amber-300">Early Checkout</div>
+                {detailRecord.shiftName && <div>Assigned shift: {detailRecord.shiftName}</div>}
+                {detailRecord.scheduledShiftEndTime && <div>Scheduled shift end: {new Date(detailRecord.scheduledShiftEndTime).toLocaleString()}</div>}
+                {detailRecord.checkOutTime && <div>Actual checkout: {new Date(detailRecord.checkOutTime).toLocaleString()}</div>}
+                <div>Reason: {detailRecord.earlyCheckoutReason || "No reason recorded"}</div>
+              </div>
+            )}
+
             {/* Audit Correction Banner */}
             {detailRecord.isManuallyCorrected && (
               <div className="p-3.5 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900 rounded-xl space-y-1 text-xs">
@@ -883,179 +924,46 @@ export const AttendanceLedgerPage: React.FC = () => {
         )}
       </Drawer>
 
-      {/* ======================================================== */}
-      {/* Modal: Administrative Correction Dialog                  */}
-      {/* ======================================================== */}
       <Modal
-        isOpen={Boolean(correctingRecord)}
-        onClose={() => setCorrectingRecord(null)}
-        title="Administrative Correction"
+        isOpen={Boolean(correctingRecord) && canCorrect}
+        onClose={() => { if (!correctMutation.isPending) setCorrectingRecord(null); }}
+        title="Correct Attendance"
         description={`Record for ${correctingRecord?.employeeId} on ${correctingRecord?.dateKey}`}
         maxWidth="xl"
       >
         {correctingRecord && (
           <div className="space-y-5">
-            {correctionError && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-xl flex items-start gap-2 text-rose-900 dark:text-rose-200 text-xs">
-                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
-                <span>{correctionError}</span>
-              </div>
-            )}
-
-            {/* Original vs Corrected Comparison Box */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-                <span>Before & After Comparison</span>
-                <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
-                  Preserved in Audit Trail
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                {/* Original Values */}
-                <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg space-y-2">
-                  <div className="font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-slate-400" />
-                    <span>Original Values</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 dark:text-slate-500 block text-[11px]">Check-In:</span>
-                    <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
-                      {correctingRecord.checkInTime
-                        ? new Date(correctingRecord.checkInTime).toLocaleString()
-                        : "None"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 dark:text-slate-500 block text-[11px]">Check-Out:</span>
-                    <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
-                      {correctingRecord.checkOutTime
-                        ? new Date(correctingRecord.checkOutTime).toLocaleString()
-                        : "None"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 dark:text-slate-500 block text-[11px]">Duration & Status:</span>
-                    <span className="font-medium text-slate-800 dark:text-slate-200">
-                      {correctingRecord.durationMinutes}m • {correctingRecord.status}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Corrected / Projected Values */}
-                <div className="p-3 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg space-y-2">
-                  <div className="font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-blue-600" />
-                    <span>Projected New Values</span>
-                  </div>
-                  <div>
-                    <span className="text-blue-500 dark:text-blue-400 block text-[11px]">Check-In:</span>
-                    <span className="font-mono font-medium text-slate-900 dark:text-slate-100">
-                      {newCheckInTime ? new Date(newCheckInTime).toLocaleString() : "Unset"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-blue-500 dark:text-blue-400 block text-[11px]">Check-Out:</span>
-                    <span className="font-mono font-medium text-slate-900 dark:text-slate-100">
-                      {newCheckOutTime ? new Date(newCheckOutTime).toLocaleString() : "Unset"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-blue-500 dark:text-blue-400 block text-[11px]">Projected Duration:</span>
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
-                      {projectedDurationMinutes}m • {newStatus || correctingRecord.status}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Editable Fields */}
+            {correctionError && <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">{correctionError}</div>}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 tracking-wide uppercase mb-1.5">
-                  Check-In Timestamp
-                </label>
-                <input
-                  type="datetime-local"
-                  value={newCheckInTime}
-                  onChange={(e) => setNewCheckInTime(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 tracking-wide uppercase mb-1.5">
-                  Check-Out Timestamp
-                </label>
-                <input
-                  type="datetime-local"
-                  value={newCheckOutTime}
-                  onChange={(e) => setNewCheckOutTime(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-                />
-              </div>
+              <Input label="Check-in time" type="datetime-local" value={newCheckInTime} onChange={(e) => setNewCheckInTime(e.target.value)} />
+              <Input label="Check-out time" type="datetime-local" value={newCheckOutTime} onChange={(e) => setNewCheckOutTime(e.target.value)} />
             </div>
-
+            <Select label="Attendance status" value={newStatus} onChange={(e) => setNewStatus(e.target.value as AttendanceStatus)}>
+              {correctionStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+            </Select>
             <div>
-              <label htmlFor="new-status-select" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 tracking-wide uppercase mb-1.5">
-                Attendance Status
-              </label>
-              <select
-                id="new-status-select"
-                value={newStatus}
-                onChange={(e) => setNewStatus(e.target.value as AttendanceStatus)}
-                aria-label="Attendance Status"
-                className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-              >
-                <option value={AttendanceStatus.PRESENT}>PRESENT</option>
-                <option value={AttendanceStatus.LATE}>LATE</option>
-                <option value={AttendanceStatus.CHECKED_OUT}>CHECKED_OUT</option>
-                <option value={AttendanceStatus.WFH_APPROVED}>WFH_APPROVED</option>
-                <option value={AttendanceStatus.HALF_DAY}>HALF_DAY</option>
-                <option value={AttendanceStatus.ABSENT}>ABSENT</option>
-                <option value={AttendanceStatus.INCOMPLETE}>INCOMPLETE</option>
-              </select>
+              <label htmlFor="attendance-correction-reason" className="mb-1.5 block text-sm font-medium">Correction reason (required)</label>
+              <textarea id="attendance-correction-reason" maxLength={500} rows={3} value={correctionReason} onChange={(e) => setCorrectionReason(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-800" placeholder="Explain why this attendance record needs correction" />
             </div>
-
-            {/* Mandatory Reason */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 tracking-wide uppercase mb-1.5 flex items-center justify-between">
-                <span>Justification Reason (Mandatory • Min 5 Chars)</span>
-                <span className="text-[11px] text-slate-400 dark:text-slate-500 font-normal">
-                  {correctionReason.length}/500
-                </span>
-              </label>
-              <textarea
-                rows={3}
-                value={correctionReason}
-                onChange={(e) => setCorrectionReason(e.target.value)}
-                placeholder="e.g. Employee forgot card/phone; verified gate entry with front security log at 09:12 AM"
-                className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCorrectingRecord(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                isLoading={correctMutation.isPending}
-                onClick={handleSubmitCorrection}
-              >
-                Apply Correction & Audit
-              </Button>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <Button variant="outline" size="sm" onClick={() => setCorrectingRecord(null)}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={requestCorrectionConfirmation}>Review correction</Button>
             </div>
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        isOpen={showCorrectionConfirm && canCorrect}
+        onClose={() => setShowCorrectionConfirm(false)}
+        onConfirm={() => void applyCorrection()}
+        title="Apply attendance correction?"
+        message={`Confirm the corrected check-in, check-out, and status for ${correctingRecord?.employeeId} on ${correctingRecord?.dateKey}. This action will be recorded in the audit history.`}
+        confirmText="Apply correction"
+        cancelText="Review again"
+        variant="primary"
+        isLoading={correctMutation.isPending}
+      />
 
       {/* ======================================================== */}
       {/* Modal: Correction History Audit Log                      */}

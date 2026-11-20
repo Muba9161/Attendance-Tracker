@@ -109,7 +109,7 @@ The backend is an Express + Socket.io server requiring a **long-running Node.js 
    | `JWT_SECRET` | *32+ character random hex or base64 secret* |
    | `JWT_EXPIRES_IN` | `15m` |
    | `REFRESH_TOKEN_EXPIRES_DAYS` | `7` |
-   | `CORS_ORIGIN` | `https://vorldx-hr.vercel.app,https://vorldx-display.vercel.app` |
+   | `CORS_ORIGIN` | `https://attendance-tracker-apps-kirtee.vercel.app,https://attendance-tracker-qq8u.vercel.app` |
    | `QR_ROTATION_SECONDS` | `30` |
    | `QR_GRACE_SECONDS` | `15` |
    | `DEFAULT_TIMEZONE` | `Asia/Kolkata` |
@@ -189,8 +189,7 @@ The Office Display is built with Next.js 15 (App Router).
 Add the following in Vercel Project Settings:
 | Variable | Value |
 | :--- | :--- |
-| `NEXT_PUBLIC_API_URL` | `https://vorldx-api.onrender.com` |
-| `NEXT_PUBLIC_WS_URL` | `https://vorldx-api.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | `https://attendance-tracker-56du.onrender.com` |
 | `NEXT_PUBLIC_DEFAULT_TERMINAL_ID` | `term_lko_01` |
 
 ### Step 4: Kiosk Tablet / Monitor Setup

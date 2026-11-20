@@ -4,6 +4,7 @@
 export const SocketEvent = {
   // Primary Canonical Event Names (assignment requirement)
   ATTENDANCE_UPDATED: "attendance.updated",
+  ATTENDANCE_DISPLAY_CONFIRMATION: "attendance.display_confirmation",
   WFH_DECIDED: "wfh.decided",
   WFH_CREATED: "wfh.created",
   EMPLOYEE_REGISTERED: "employee.registered",
@@ -103,8 +104,20 @@ export interface AttendanceUpdatedPayload {
   message?: string;
 }
 
+export interface AttendanceDisplayConfirmationPayload {
+  recordId: string;
+  terminalId: string;
+  employeeName: string;
+  maskedEmployeeId: string;
+  punchType: "CHECK_IN" | "CHECK_OUT";
+  timestamp: string;
+  timeZone: string;
+}
+
 export interface WfhCreatedPayload {
   requestId: string;
+  /** Stable identity for this submission occurrence (including resubmissions). */
+  eventId?: string;
   employeeId: string;
   employeeName?: string;
   department?: string;

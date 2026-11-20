@@ -5,12 +5,12 @@ export declare const WfhCreateRequestSchema: z.ZodObject<{
     reason: z.ZodString;
     simulatedNow: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    reason: string;
     dateKey: string;
+    reason: string;
     simulatedNow?: string | undefined;
 }, {
-    reason: string;
     dateKey: string;
+    reason: string;
     simulatedNow?: string | undefined;
 }>;
 export type WfhCreateRequest = z.infer<typeof WfhCreateRequestSchema>;
@@ -41,10 +41,10 @@ export declare const WfhRequestRecordSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     status: WfhStatus;
     _id: string;
-    createdAt: string;
-    reason: string;
     employeeId: string;
     dateKey: string;
+    createdAt: string;
+    reason: string;
     updatedAt?: string | undefined;
     department?: string | undefined;
     employeeName?: string | undefined;
@@ -54,10 +54,10 @@ export declare const WfhRequestRecordSchema: z.ZodObject<{
 }, {
     status: WfhStatus;
     _id: string;
-    createdAt: string;
-    reason: string;
     employeeId: string;
     dateKey: string;
+    createdAt: string;
+    reason: string;
     updatedAt?: string | undefined;
     department?: string | undefined;
     employeeName?: string | undefined;
@@ -93,6 +93,8 @@ export declare const WfhFilterQuerySchema: z.ZodObject<{
     status: z.ZodOptional<z.ZodEnum<[WfhStatus.PENDING, WfhStatus.APPROVED, WfhStatus.REJECTED, WfhStatus.CANCELLED, "ALL"]>>;
     department: z.ZodOptional<z.ZodString>;
     month: z.ZodOptional<z.ZodString>;
+    startDate: z.ZodOptional<z.ZodString>;
+    endDate: z.ZodOptional<z.ZodString>;
     search: z.ZodOptional<z.ZodString>;
     page: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -100,16 +102,20 @@ export declare const WfhFilterQuerySchema: z.ZodObject<{
     page: number;
     limit: number;
     status?: "ALL" | WfhStatus | undefined;
+    month?: string | undefined;
+    startDate?: string | undefined;
+    endDate?: string | undefined;
     department?: string | undefined;
     search?: string | undefined;
-    month?: string | undefined;
 }, {
     status?: "ALL" | WfhStatus | undefined;
-    department?: string | undefined;
-    search?: string | undefined;
+    month?: string | undefined;
     page?: number | undefined;
     limit?: number | undefined;
-    month?: string | undefined;
+    startDate?: string | undefined;
+    endDate?: string | undefined;
+    department?: string | undefined;
+    search?: string | undefined;
 }>;
 export type WfhFilterQuery = z.infer<typeof WfhFilterQuerySchema>;
 //# sourceMappingURL=wfh.d.ts.map

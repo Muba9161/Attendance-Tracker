@@ -762,12 +762,12 @@ export const AnnouncementsPage: React.FC = () => {
       >
         <div className="space-y-4">
           {/* Subheader / Tabs for Compose vs Preview */}
-          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-            <div className="flex items-center gap-2">
+          <div className="announcement-composer-tabs flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+            <div className="announcement-composer-tab-list flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setComposerTab("compose")}
-                className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
+                className={`announcement-composer-tab px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
                   composerTab === "compose"
                     ? "bg-blue-600 text-white"
                     : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -778,7 +778,7 @@ export const AnnouncementsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setComposerTab("preview")}
-                className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 ${
+                className={`announcement-composer-tab px-3 py-1 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 ${
                   composerTab === "preview"
                     ? "bg-blue-600 text-white"
                     : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -788,7 +788,7 @@ export const AnnouncementsPage: React.FC = () => {
                 <span>Live Feed Preview</span>
               </button>
             </div>
-            <span className="text-[11px] text-slate-400">
+            <span className="announcement-composer-hint text-[11px] text-slate-400">
               Targeted broadcasts emit instant socket updates
             </span>
           </div>
@@ -988,7 +988,7 @@ export const AnnouncementsPage: React.FC = () => {
               </div>
 
               {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <div className="announcement-composer-actions flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <Button
                   type="button"
                   variant="outline"

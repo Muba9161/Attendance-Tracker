@@ -17,6 +17,7 @@ import {
 import { calendarService } from "./calendar.service";
 import { policyService } from "./policy.service";
 import { eventEmitterService } from "./eventEmitter.service";
+import { notifyHrUsersOnce } from "./notification.service";
 import { AppError } from "../utils/AppError";
 import {
   ApiErrorCode,
@@ -106,7 +107,7 @@ export class LeaveService {
       name,
       code,
       paid: data.paid ?? true,
-      annualQuota: data.annualQuota ?? 12,
+      annualQuota: data.annualQuota,
       carryForwardRule: {
         allowed: data.carryForwardRule?.allowed ?? false,
         maxDays: data.carryForwardRule?.maxDays ?? 0,
@@ -244,8 +245,7 @@ export class LeaveService {
   // ============================================================================
 
   /**
-   * Retrieves or auto-initializes leave balances for an employee in a given year.
-   * Ensures active leave types are populated and calculates the live available balance.
+   * Retrieves persisted leave balances for an employee and calculates the live available balance.
    */
   public async getEmployeeBalances(
     employeeIdentifier: string,
@@ -269,32 +269,6 @@ export class LeaveService {
     }
 
     const year = targetYear || new Date().getFullYear();
-    const activeTypes = await LeaveType.find({ isActive: true });
-
-    // Seed any missing balance records for active leave types
-    for (const lt of activeTypes) {
-      const existing = await LeaveBalance.findOne({
-        employee: employee._id,
-        type: lt._id,
-        year,
-      });
-
-      if (!existing) {
-        await LeaveBalance.create({
-          employee: employee._id,
-          type: lt._id,
-          year,
-          allotted: lt.annualQuota,
-          used: 0,
-          pending: 0,
-          carriedOver: 0,
-        }).catch((err: any) => {
-          // Handle rare race conditions idempotently
-          if (err.code !== 11000) throw err;
-        });
-      }
-    }
-
     const balances = await LeaveBalance.find({
       employee: employee._id,
       year,
@@ -353,6 +327,16 @@ export class LeaveService {
     if (query.department) empFilter.department = query.department;
     if (query.employeeId) empFilter.employeeId = query.employeeId.toUpperCase();
 
+    const employeesWithBalances = await LeaveBalance.distinct("employee", { year });
+    if (employeesWithBalances.length === 0) {
+      return {
+        success: true,
+        data: [],
+        pagination: { total: 0, page, limit, totalPages: 1 },
+      };
+    }
+    empFilter._id = { $in: employeesWithBalances };
+
     const [employees, total] = await Promise.all([
       Employee.find(empFilter).sort({ employeeId: 1 }).skip(skip).limit(limit),
       Employee.countDocuments(empFilter),
@@ -361,7 +345,7 @@ export class LeaveService {
     const results = [];
     for (const emp of employees) {
       const empData = await this.getEmployeeBalances(emp._id.toString(), year);
-      results.push({
+      if (empData.balances.length > 0) results.push({
         employee: {
           id: emp._id.toString(),
           employeeId: emp.employeeId,
@@ -408,11 +392,17 @@ export class LeaveService {
     });
 
     if (!balance) {
+      if (input.allotted === undefined) {
+        throw AppError.badRequest(
+          "An explicit allotted balance is required when allocating leave for the first time.",
+          ApiErrorCode.ERR_INVALID_INPUT
+        );
+      }
       balance = await LeaveBalance.create({
         employee: employee._id,
         type: leaveType._id,
         year,
-        allotted: leaveType.annualQuota,
+        allotted: input.allotted,
         used: 0,
         pending: 0,
         carriedOver: 0,
@@ -519,7 +509,7 @@ export class LeaveService {
             employee: emp._id,
             type: lt._id,
             year: toYear,
-            allotted: lt.annualQuota,
+            allotted: 0,
             used: 0,
             pending: 0,
             carriedOver: carriedDays,
@@ -732,24 +722,67 @@ export class LeaveService {
       );
     }
 
-    // Create the Leave Request
-    const leaveRequest = await LeaveRequest.create({
-      employee: employee._id,
-      type: leaveType._id,
-      startDate: startDateObj,
-      endDate: endDateObj,
-      isHalfDay: input.isHalfDay ?? false,
-      halfDayType: input.isHalfDay ? input.halfDayType : undefined,
-      workingDays,
-      reason: input.reason.trim(),
-      status: "PENDING",
-    });
-
-    // Atomically reserve the balance by incrementing 'pending'
-    await LeaveBalance.findOneAndUpdate(
-      { employee: employee._id, type: leaveType._id, year: targetYear },
-      { $inc: { pending: workingDays } }
+    // Reserve against the persisted allocation atomically so concurrent
+    // applications cannot consume more than the employee's available balance.
+    const reservedBalance = await LeaveBalance.findOneAndUpdate(
+      {
+        employee: employee._id,
+        type: leaveType._id,
+        year: targetYear,
+        $expr: {
+          $gte: [
+            {
+              $subtract: [
+                { $add: [{ $ifNull: ["$allotted", 0] }, { $ifNull: ["$carriedOver", 0] }] },
+                { $add: [{ $ifNull: ["$used", 0] }, { $ifNull: ["$pending", 0] }] },
+              ],
+            },
+            workingDays,
+          ],
+        },
+      },
+      { $inc: { pending: workingDays } },
+      { new: true }
     );
+
+    if (!reservedBalance) {
+      throw new AppError(
+        400,
+        ApiErrorCode.ERR_INSUFFICIENT_BALANCE,
+        `No allocated balance is available for ${leaveType.name}, or the remaining balance is insufficient.`
+      );
+    }
+
+    // Create the Leave Request; release the reservation if persistence fails.
+    let leaveRequest: ILeaveRequest;
+    try {
+      leaveRequest = await LeaveRequest.create({
+        employee: employee._id,
+        type: leaveType._id,
+        startDate: startDateObj,
+        endDate: endDateObj,
+        isHalfDay: input.isHalfDay ?? false,
+        halfDayType: input.isHalfDay ? input.halfDayType : undefined,
+        workingDays,
+        reason: input.reason.trim(),
+        status: "PENDING",
+      });
+    } catch (error) {
+      await LeaveBalance.updateOne(
+        { _id: reservedBalance._id },
+        { $inc: { pending: -workingDays } }
+      );
+      throw error;
+    }
+
+    const requestEventId = `leave-request:${leaveRequest._id}`;
+    await notifyHrUsersOnce({
+      eventId: requestEventId,
+      type: "LEAVE_STATUS",
+      title: "New Leave Application",
+      message: `${employee.name} applied for ${leaveType.name} (${workingDays} day${workingDays === 1 ? "" : "s"}).`,
+      payload: { requestId: leaveRequest._id.toString(), eventId: requestEventId, status: "PENDING" },
+    });
 
     // Audit Logging
     await AuditEvent.create({

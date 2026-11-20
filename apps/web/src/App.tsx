@@ -1,4 +1,4 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -8,27 +8,29 @@ import { ToastProvider } from "./components/ui/Toast";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { RoleGuard } from "./routes/RoleGuard";
 import { AppShell } from "./components/layout/AppShell";
-import { LoginPage } from "./pages/LoginPage";
-import { SignupPage } from "./pages/SignupPage";
-import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
-import { ResetPasswordPage } from "./pages/ResetPasswordPage";
-import { VerifyEmailPage } from "./pages/VerifyEmailPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { AttendanceLedgerPage } from "./pages/AttendanceLedgerPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { WfhPage } from "./pages/WfhPage";
-import { EmployeesPage } from "./pages/EmployeesPage";
-import { PoliciesPage } from "./pages/PoliciesPage";
-import { DisplaysPage } from "./pages/DisplaysPage";
-import { AuditLogsPage } from "./pages/AuditLogsPage";
-import { SecurityPage } from "./pages/SecurityPage";
-import { CalendarPage } from "./pages/CalendarPage";
-import { LeavePage } from "./pages/LeavePage";
-import { AnnouncementsPage } from "./pages/AnnouncementsPage";
-import { EnquiriesPage } from "./pages/EnquiriesPage";
-import { AppReleasesPage } from "./pages/AppReleasesPage";
-import { UnauthorizedPage } from "./pages/UnauthorizedPage";
-import { NotFoundPage } from "./pages/NotFoundPage";
+const LoginPage = lazy(() => import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })));
+const SignupPage = lazy(() => import("./pages/SignupPage").then((module) => ({ default: module.SignupPage })));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage").then((module) => ({ default: module.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage").then((module) => ({ default: module.ResetPasswordPage })));
+const VerifyEmailPage = lazy(() => import("./pages/VerifyEmailPage").then((module) => ({ default: module.VerifyEmailPage })));
+const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
+const AttendanceLedgerPage = lazy(() => import("./pages/AttendanceLedgerPage").then((module) => ({ default: module.AttendanceLedgerPage })));
+const ReportsPage = lazy(() => import("./pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
+const WfhPage = lazy(() => import("./pages/WfhPage").then((module) => ({ default: module.WfhPage })));
+const EmployeesPage = lazy(() => import("./pages/EmployeesPage").then((module) => ({ default: module.EmployeesPage })));
+const PoliciesPage = lazy(() => import("./pages/PoliciesPage").then((module) => ({ default: module.PoliciesPage })));
+const DisplaysPage = lazy(() => import("./pages/DisplaysPage").then((module) => ({ default: module.DisplaysPage })));
+const AuditLogsPage = lazy(() => import("./pages/AuditLogsPage").then((module) => ({ default: module.AuditLogsPage })));
+const SecurityPage = lazy(() => import("./pages/SecurityPage").then((module) => ({ default: module.SecurityPage })));
+const CalendarPage = lazy(() => import("./pages/CalendarPage").then((module) => ({ default: module.CalendarPage })));
+const LeavePage = lazy(() => import("./pages/LeavePage").then((module) => ({ default: module.LeavePage })));
+const AnnouncementsPage = lazy(() => import("./pages/AnnouncementsPage").then((module) => ({ default: module.AnnouncementsPage })));
+const EnquiriesPage = lazy(() => import("./pages/EnquiriesPage").then((module) => ({ default: module.EnquiriesPage })));
+const AppReleasesPage = lazy(() => import("./pages/AppReleasesPage").then((module) => ({ default: module.AppReleasesPage })));
+const UnauthorizedPage = lazy(() => import("./pages/UnauthorizedPage").then((module) => ({ default: module.UnauthorizedPage })));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage").then((module) => ({ default: module.NotFoundPage })));
+const EmployeeDashboardPage = lazy(() => import("./pages/EmployeeDashboardPage").then((module) => ({ default: module.EmployeeDashboardPage })));
+const HrManagementPage = lazy(() => import("./pages/HrManagementPage").then((module) => ({ default: module.HrManagementPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,6 +49,7 @@ export const App: React.FC = () => {
           <AuthProvider>
           <SocketProvider>
             <BrowserRouter>
+              <Suspense fallback={null}>
               <Routes>
                 {/* Public Authentication Routes */}
                 <Route path="/login" element={<LoginPage />} />
@@ -57,6 +60,9 @@ export const App: React.FC = () => {
 
                 {/* Protected Administrative Application Shell */}
                 <Route element={<ProtectedRoute />}>
+                  <Route element={<RoleGuard allowedRoles={["EMPLOYEE"]} allowAdminBypass={false} />}>
+                    <Route path="/employee-dashboard" element={<EmployeeDashboardPage />} />
+                  </Route>
                   <Route element={<AppShell />}>
                     {/* Role-Guarded HR & Admin Routes */}
                     <Route element={<RoleGuard allowedRoles={["HR", "ADMIN", "HR_ADMIN"]} />}>
@@ -76,10 +82,13 @@ export const App: React.FC = () => {
                       <Route path="/helpdesk" element={<Navigate to="/enquiries" replace />} />
                       <Route path="/displays" element={<DisplaysPage />} />
                       <Route path="/audit-logs" element={<AuditLogsPage />} />
-                      <Route path="/security" element={<SecurityPage />} />
-                      <Route path="/settings/security" element={<Navigate to="/security" replace />} />
-                      <Route path="/releases" element={<AppReleasesPage />} />
-                      <Route path="/admin/releases" element={<Navigate to="/releases" replace />} />
+                      <Route element={<RoleGuard allowedRoles={["ADMIN"]} />}>
+                        <Route path="/hr-management" element={<HrManagementPage />} />
+                        <Route path="/security" element={<SecurityPage />} />
+                        <Route path="/settings/security" element={<Navigate to="/security" replace />} />
+                        <Route path="/releases" element={<AppReleasesPage />} />
+                        <Route path="/admin/releases" element={<Navigate to="/releases" replace />} />
+                      </Route>
                     </Route>
 
                     {/* Common Protected Fallbacks */}
@@ -88,6 +97,7 @@ export const App: React.FC = () => {
                   </Route>
                 </Route>
               </Routes>
+              </Suspense>
             </BrowserRouter>
           </SocketProvider>
         </AuthProvider>

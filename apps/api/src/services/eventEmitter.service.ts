@@ -2,6 +2,7 @@ import {
   SocketEvent,
   SocketRoom,
   AttendanceUpdatedPayload,
+  AttendanceDisplayConfirmationPayload,
   WfhCreatedPayload,
   WfhDecidedPayload,
   EmployeeRegisteredPayload,
@@ -109,6 +110,40 @@ export class EventEmitterService {
     }
   }
 
+  /** Sends minimal, masked attendance confirmation data only to the QR display used. */
+  public emitAttendanceDisplayConfirmation(payload: {
+    recordId: string;
+    terminalId: string;
+    employeeName: string;
+    employeeId: string;
+    punchType: "CHECK_IN" | "CHECK_OUT";
+    timestamp: string;
+    timeZone: string;
+  }): void {
+    const io = getSocketServer();
+    if (!io || !payload.terminalId) return;
+
+    const employeeId = payload.employeeId.trim();
+    const confirmation: AttendanceDisplayConfirmationPayload = {
+      recordId: payload.recordId,
+      terminalId: payload.terminalId,
+      employeeName: payload.employeeName,
+      maskedEmployeeId: employeeId.length > 2 ? `••••${employeeId.slice(-2)}` : "••••",
+      punchType: payload.punchType,
+      timestamp: payload.timestamp,
+      timeZone: payload.timeZone,
+    };
+
+    try {
+      io.to(SocketRoom.display(payload.terminalId)).emit(
+        SocketEvent.ATTENDANCE_DISPLAY_CONFIRMATION,
+        confirmation
+      );
+    } catch (err) {
+      logger.error("Failed to emit display attendance confirmation", err);
+    }
+  }
+
   /**
    * Emits WFH created event to HR review queue and the requesting employee.
    * Database write must be completed before calling this.
@@ -118,8 +153,8 @@ export class EventEmitterService {
     if (!io) return;
 
     try {
-      io.to(SocketRoom.hr()).emit(SocketEvent.WFH_CREATED, payload);
-      io.to(SocketRoom.hrDashboard()).emit(SocketEvent.WFH_CREATED, payload);
+      // HR sockets join both rooms; chained targets form a union and emit once per socket.
+      io.to(SocketRoom.hr()).to(SocketRoom.hrDashboard()).emit(SocketEvent.WFH_CREATED, payload);
       io.to(SocketRoom.hrDashboard()).emit(SocketEvent.WFH_NEW_REQUEST, payload);
 
       io.to(SocketRoom.employee(payload.employeeId)).emit(SocketEvent.WFH_CREATED, payload);
@@ -142,8 +177,7 @@ export class EventEmitterService {
       io.to(SocketRoom.employee(payload.employeeId)).emit(SocketEvent.WFH_DECIDED, payload);
       io.to(SocketRoom.employee(payload.employeeId)).emit(SocketEvent.WFH_STATUS_UPDATED, payload);
 
-      io.to(SocketRoom.hr()).emit(SocketEvent.WFH_DECIDED, payload);
-      io.to(SocketRoom.hrDashboard()).emit(SocketEvent.WFH_DECIDED, payload);
+      io.to(SocketRoom.hr()).to(SocketRoom.hrDashboard()).emit(SocketEvent.WFH_DECIDED, payload);
 
       logger.debug(
         `[Socket] Emitted wfh.decided for employee ${payload.employeeId} (${payload.status})`
@@ -294,8 +328,7 @@ export class EventEmitterService {
       if (payload.employeeId) {
         io.to(SocketRoom.employee(payload.employeeId)).emit(SocketEvent.LEAVE_REQUESTED, payload);
       }
-      io.to(SocketRoom.hr()).emit(SocketEvent.LEAVE_REQUESTED, payload);
-      io.to(SocketRoom.hrDashboard()).emit(SocketEvent.LEAVE_REQUESTED, payload);
+      io.to(SocketRoom.hr()).to(SocketRoom.hrDashboard()).emit(SocketEvent.LEAVE_REQUESTED, payload);
       logger.debug(`[Socket] Emitted leave.requested for ${payload.employeeId || payload.requestId}`);
     } catch (err) {
       logger.error(`Failed to emit leave.requested:`, err);
@@ -313,8 +346,7 @@ export class EventEmitterService {
       if (payload.employeeId) {
         io.to(SocketRoom.employee(payload.employeeId)).emit(SocketEvent.LEAVE_DECIDED, payload);
       }
-      io.to(SocketRoom.hr()).emit(SocketEvent.LEAVE_DECIDED, payload);
-      io.to(SocketRoom.hrDashboard()).emit(SocketEvent.LEAVE_DECIDED, payload);
+      io.to(SocketRoom.hr()).to(SocketRoom.hrDashboard()).emit(SocketEvent.LEAVE_DECIDED, payload);
       logger.debug(`[Socket] Emitted leave.decided for ${payload.employeeId || payload.requestId} (${payload.status})`);
     } catch (err) {
       logger.error(`Failed to emit leave.decided:`, err);

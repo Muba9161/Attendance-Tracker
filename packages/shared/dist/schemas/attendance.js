@@ -12,6 +12,7 @@ exports.AttendanceScanRequestSchema = zod_1.z
     qrPayload: zod_1.z.string().trim().min(1).optional(),
     action: zod_1.z.enum(["CHECK_IN", "CHECK_OUT"]).optional(),
     simulatedNow: zod_1.z.string().optional(),
+    earlyCheckoutReason: zod_1.z.string().max(500).optional(),
 })
     .refine((data) => data.token || data.qrPayload, {
     message: "Either token or qrPayload is required",
@@ -106,7 +107,16 @@ exports.AttendanceFilterQuerySchema = zod_1.z.object({
 });
 exports.AttendanceCorrectionRequestSchema = zod_1.z
     .object({
-    status: zod_1.z.nativeEnum(enums_1.AttendanceStatus).optional(),
+    status: zod_1.z
+        .enum([
+        enums_1.AttendanceStatus.PRESENT,
+        enums_1.AttendanceStatus.LATE,
+        enums_1.AttendanceStatus.HALF_DAY,
+        enums_1.AttendanceStatus.CHECKED_OUT,
+        enums_1.AttendanceStatus.ABSENT,
+        enums_1.AttendanceStatus.INCOMPLETE,
+    ])
+        .optional(),
     checkInTime: zod_1.z.string().datetime().nullable().optional(),
     checkOutTime: zod_1.z.string().datetime().nullable().optional(),
     reason: zod_1.z
@@ -114,8 +124,6 @@ exports.AttendanceCorrectionRequestSchema = zod_1.z
         .min(5, "Justification reason must be at least 5 characters")
         .max(500, "Justification reason cannot exceed 500 characters")
         .trim(),
-    isLate: zod_1.z.boolean().optional(),
-    isMissingCheckout: zod_1.z.boolean().optional(),
 })
     .refine((data) => {
     if (data.checkInTime && data.checkOutTime) {

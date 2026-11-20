@@ -4,6 +4,9 @@ import { fileURLToPath, URL } from "node:url";
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Keep compatibility with existing NEXT_PUBLIC_API_URL deployments while
+  // using Vite's VITE_API_URL as the primary setting.
+  envPrefix: ["VITE_", "NEXT_PUBLIC_"],
   plugins: [react()],
   build: {
     rollupOptions: {
@@ -26,12 +29,12 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/api": {
-        target: process.env.VITE_API_URL || "http://localhost:4000",
+        target: process.env.VITE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
         changeOrigin: true,
         secure: false,
       },
       "/socket.io": {
-        target: process.env.VITE_API_URL || "http://localhost:4000",
+        target: process.env.VITE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
         changeOrigin: true,
         ws: true,
       },
@@ -41,12 +44,12 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/api": {
-        target: process.env.VITE_API_URL || "http://localhost:4000",
+        target: process.env.VITE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
         changeOrigin: true,
         secure: false,
       },
       "/socket.io": {
-        target: process.env.VITE_API_URL || "http://localhost:4000",
+        target: process.env.VITE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
         changeOrigin: true,
         ws: true,
       },

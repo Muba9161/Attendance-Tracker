@@ -13,6 +13,43 @@ import {
 } from "@vorldx/shared";
 import { ActorContext } from "./employee.service";
 
+type PolicyShiftInput = {
+  name: string;
+  startTime: string;
+  endTime: string;
+  isOvernight?: boolean;
+  isActive?: boolean;
+};
+
+function validateActiveShiftOverlaps(shifts: PolicyShiftInput[]): string | null {
+  const activeShifts = shifts.filter((shift) => shift.isActive !== false);
+  const segments = (shift: PolicyShiftInput): Array<[number, number]> => {
+    const toMinutes = (value: string) => {
+      const [hours, minutes] = value.split(":").map(Number);
+      return hours * 60 + minutes;
+    };
+    const start = toMinutes(shift.startTime);
+    const end = toMinutes(shift.endTime);
+    return shift.isOvernight ? [[start, 1440], [0, end]] : [[start, end]];
+  };
+
+  for (let i = 0; i < activeShifts.length; i++) {
+    for (let j = i + 1; j < activeShifts.length; j++) {
+      const first = activeShifts[i];
+      const second = activeShifts[j];
+      const overlaps = segments(first).some(([firstStart, firstEnd]) =>
+        segments(second).some(
+          ([secondStart, secondEnd]) => Math.max(firstStart, secondStart) < Math.min(firstEnd, secondEnd)
+        )
+      );
+      if (overlaps) {
+        return `Active shifts '${first.name}' and '${second.name}' have overlapping hours`;
+      }
+    }
+  }
+  return null;
+}
+
 export class PolicyService {
   /**
    * Retrieves the active default company attendance policy.
@@ -109,6 +146,12 @@ export class PolicyService {
           ApiErrorCode.ERR_INVALID_INPUT
         );
       }
+      const overlapError = validateActiveShiftOverlaps(
+        data.shifts as PolicyShiftInput[]
+      );
+      if (overlapError) {
+        throw AppError.badRequest(overlapError, ApiErrorCode.ERR_INVALID_INPUT);
+      }
       policy.shifts = data.shifts as unknown as typeof policy.shifts;
     }
 
@@ -125,7 +168,18 @@ export class PolicyService {
     }
 
     if (data.name) policy.name = String(data.name).trim();
-    if (data.timezone) policy.timezone = String(data.timezone).trim();
+    if (data.timezone !== undefined) {
+      const timezone = String(data.timezone).trim();
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+      } catch {
+        throw AppError.badRequest(
+          "Timezone must be a valid IANA timezone",
+          ApiErrorCode.ERR_INVALID_INPUT
+        );
+      }
+      policy.timezone = timezone;
+    }
     if (data.minFullDayHours !== undefined) policy.minFullDayHours = Number(data.minFullDayHours);
     if (data.minHalfDayHours !== undefined) policy.minHalfDayHours = Number(data.minHalfDayHours);
     if (data.monthlyWfhQuota !== undefined) policy.monthlyWfhQuota = Number(data.monthlyWfhQuota);

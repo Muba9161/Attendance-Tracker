@@ -458,8 +458,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   filterPillActive: {
-    backgroundColor: 'rgba(89, 101, 242, 0.16)',
-    borderColor: 'rgba(133, 145, 255, 0.45)',
+    backgroundColor: 'rgba(20, 127, 181, 0.16)',
+    borderColor: 'rgba(20, 127, 181, 0.45)',
   },
   listContainer: {
     gap: spacing.md,
@@ -480,7 +480,7 @@ const styles = StyleSheet.create({
   },
   cardUnread: {
     borderWidth: 1.2,
-    borderColor: 'rgba(89, 101, 242, 0.35)',
+    borderColor: 'rgba(20, 127, 181, 0.35)',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -514,7 +514,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(184, 190, 255, 0.08)',
+    borderTopColor: 'rgba(184, 204, 214, 0.08)',
   },
   expandPrompt: {
     flexDirection: 'row',
@@ -537,9 +537,9 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 22,
-    backgroundColor: 'rgba(89, 101, 242, 0.1)',
+    backgroundColor: 'rgba(20, 127, 181, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.25)',
+    borderColor: 'rgba(20, 127, 181, 0.25)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,

@@ -44,7 +44,7 @@ export const LoginSceneFallback: React.FC<LoginSceneFallbackProps> = ({
           <linearGradient id="orbGrad1" x1="20" y1="20" x2="180" y2="180" gradientUnits="userSpaceOnUse">
             <stop stopColor="#06b6d4" />
             <stop offset="0.5" stopColor="#3b82f6" />
-            <stop offset="1" stopColor="#6366f1" />
+            <stop offset="1" stopColor="#147FB5" />
           </linearGradient>
           <linearGradient id="orbGrad2" x1="180" y1="20" x2="20" y2="180" gradientUnits="userSpaceOnUse">
             <stop stopColor="#38bdf8" />
@@ -114,7 +114,7 @@ export const LoginSceneFallback: React.FC<LoginSceneFallbackProps> = ({
         <circle cx="168" cy="82" r="4" fill="#06b6d4">
           <animate attributeName="opacity" values="0.4;1;0.4" dur="2s" repeatCount="indefinite" />
         </circle>
-        <circle cx="32" cy="118" r="3.5" fill="#6366f1">
+        <circle cx="32" cy="118" r="3.5" fill="#147FB5">
           <animate attributeName="opacity" values="1;0.4;1" dur="2.5s" repeatCount="indefinite" />
         </circle>
       </svg>

@@ -1,16 +1,17 @@
 process.env.NODE_ENV = "test";
 
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import { beforeAll, afterAll, afterEach } from "vitest";
 
-let mongod: MongoMemoryServer | null = null;
+let mongod: MongoMemoryReplSet | null = null;
+export let inMemoryMongoUri: string | null = null;
 
 beforeAll(async () => {
   try {
-    mongod = await MongoMemoryServer.create();
-    const uri = mongod.getUri();
-    await mongoose.connect(uri);
+    mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+    inMemoryMongoUri = mongod.getUri();
+    await mongoose.connect(inMemoryMongoUri);
   } catch (err) {
     console.warn(
       "Notice: In-memory MongoDB initialization skipped or failed, connecting to fallback:",

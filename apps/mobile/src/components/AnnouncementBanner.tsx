@@ -63,7 +63,7 @@ export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({
   };
 
   const handlePress = () => {
-    router.push("/announcements" as any);
+    router.push("/announcements");
   };
 
   const handleClose = () => {

@@ -192,7 +192,7 @@ export interface RegisterStartResponse {
     email: string;
     maskedEmail: string;
     expiresInMinutes: number;
-    simulatedOtp?: string;
+    resendAfterSeconds: number;
   };
 }
 
@@ -231,7 +231,14 @@ export const authApi = {
    * Step 1: Initiate registration with employeeId
    */
   async registerStart(employeeId: string): Promise<RegisterStartResponse> {
-    return apiRequest<RegisterStartResponse>("/api/auth/register-start", {
+    return apiRequest<RegisterStartResponse>("/api/auth/mobile/register-start", {
+      method: "POST",
+      body: JSON.stringify({ employeeId: employeeId.trim().toUpperCase() }),
+    });
+  },
+
+  async registerResend(employeeId: string): Promise<RegisterStartResponse> {
+    return apiRequest<RegisterStartResponse>("/api/auth/mobile/register-resend", {
       method: "POST",
       body: JSON.stringify({ employeeId: employeeId.trim().toUpperCase() }),
     });
@@ -272,12 +279,14 @@ export const authApi = {
    * Log in with email or employee ID and password
    */
   async login(emailOrEmployeeId: string, password: string): Promise<LoginResponse> {
+    const identifier = emailOrEmployeeId.trim();
+    const credentials = identifier.includes("@")
+      ? { email: identifier.toLowerCase(), password }
+      : { employeeId: identifier.toUpperCase(), password };
+
     return apiRequest<LoginResponse>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({
-        email: emailOrEmployeeId.trim(),
-        password,
-      }),
+      body: JSON.stringify(credentials),
     });
   },
 
@@ -320,6 +329,10 @@ export interface AttendanceRecordItem {
   isMissingCheckout: boolean;
   isManuallyCorrected: boolean;
   terminalId?: string;
+  shiftName?: string | null;
+  scheduledShiftEndTime?: string | null;
+  isEarlyCheckout?: boolean;
+  earlyCheckoutReason?: string | null;
 }
 
 export interface TodayAttendanceResponse {
@@ -391,10 +404,10 @@ export const attendanceApi = {
    * Submits ONLY the QR token to the backend.
    * STRICT SECURITY REQUIREMENT: Never sends a client timestamp!
    */
-  async scanAttendance(token: string): Promise<ScanAttendanceResult> {
+  async scanAttendance(token: string, earlyCheckoutReason?: string): Promise<ScanAttendanceResult> {
     return apiRequest<ScanAttendanceResult>("/api/attendance/scan", {
       method: "POST",
-      body: JSON.stringify({ token: token.trim() }),
+      body: JSON.stringify({ token: token.trim(), ...(earlyCheckoutReason !== undefined ? { earlyCheckoutReason } : {}) }),
     });
   },
 };
@@ -404,10 +417,14 @@ export interface WfhEligibilityResponse {
   isEligible?: boolean;
   eligible?: boolean;
   reason?: string;
+  rules?: string;
+  reasons?: string[];
   department?: string;
   workType?: string;
   monthlyQuota?: number;
   policyQuota?: number;
+  advanceNoticeDays?: number;
+  allowedDaysPerWeek?: number;
   usedDays?: number;
   approvedCountThisMonth?: number;
   pendingCountThisMonth?: number;
@@ -480,11 +497,13 @@ export interface EmployeeDetails {
   designation: string;
   workType: string;
   joiningDate: string;
+  shiftId?: string | null;
   status: string;
   isActive: boolean;
 }
 
 export interface ShiftInfo {
+  _id?: string;
   name: string;
   startTime: string;
   endTime: string;

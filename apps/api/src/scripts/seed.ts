@@ -281,32 +281,9 @@ const DUMMY_EMPLOYEES: DummyEmployeeSpec[] = [
 export async function runSeed(): Promise<void> {
   console.log("🌱 Starting database seed script...");
 
-  // 1. Production safety verification: Refuse to run with demo/default credentials
+  // 1. Demo seed data is never written to a production database.
   if (process.env.NODE_ENV === "production") {
-    const demoInsecurePasswords = [
-      "Admin@VorldX2026!",
-      "Hr@VorldX2026!",
-      "Employee@2026!",
-      "demo",
-      "admin",
-      "password",
-      "123456",
-    ];
-
-    const adminPass = process.env.ADMIN_DEFAULT_PASSWORD;
-    const hrPass = process.env.HR_DEFAULT_PASSWORD;
-
-    if (!adminPass || demoInsecurePasswords.includes(adminPass)) {
-      throw new Error(
-        "FATAL: Refusing to seed production database! ADMIN_DEFAULT_PASSWORD must be explicitly provided and cannot use default demo credentials in production."
-      );
-    }
-
-    if (!hrPass || demoInsecurePasswords.includes(hrPass)) {
-      throw new Error(
-        "FATAL: Refusing to seed production database! HR_DEFAULT_PASSWORD must be explicitly provided and cannot use default demo credentials in production."
-      );
-    }
+    throw new Error("FATAL: Refusing to seed production database with demo data.");
   }
 
   // 2. Connect to MongoDB if not already connected
@@ -365,118 +342,7 @@ export async function runSeed(): Promise<void> {
 
   const shiftIds = policy.shifts.map((s) => s._id);
 
-  // 4. Seed Demo Admin User
-  const adminPassword = env.ADMIN_DEFAULT_PASSWORD;
-  const adminPasswordHash = await hashPassword(adminPassword);
-
-  let adminUser = await User.findOne({ employeeId: "ADM-001" });
-  if (!adminUser) {
-    adminUser = await User.create({
-      employeeId: "ADM-001",
-      email: "admin@vorldx.demo",
-      mobileNumber: "+919876543210",
-      passwordHash: adminPasswordHash,
-      role: UserRole.ADMIN,
-      status: "ACTIVE",
-      isEmailVerified: true,
-    });
-    console.log(" Created Demo Admin user: ADM-001 (admin@vorldx.demo / +919876543210)");
-  } else {
-    adminUser.passwordHash = adminPasswordHash;
-    adminUser.role = UserRole.ADMIN;
-    adminUser.mobileNumber = "+919876543210";
-    adminUser.status = "ACTIVE";
-    adminUser.isEmailVerified = true;
-    await adminUser.save();
-    console.log(" Updated Demo Admin user: ADM-001");
-  }
-
-  await Employee.findOneAndUpdate(
-    { employeeId: "ADM-001" },
-    {
-      $set: {
-        employeeId: "ADM-001",
-        name: "System Administrator",
-        email: "admin@vorldx.demo",
-        mobileNumber: "+919876543210",
-        department: "Executive",
-        designation: "Platform Super Admin",
-        workType: WorkType.FULL_TIME,
-        shiftId: shiftIds[0],
-        joiningDate: "2022-01-01",
-        isActive: true,
-        userId: adminUser._id,
-      },
-    },
-    { upsert: true, new: true }
-  );
-
-  // 5. Seed Demo HR User
-  const hrPassword = env.HR_DEFAULT_PASSWORD;
-  const hrPasswordHash = await hashPassword(hrPassword);
-
-  let hrUser = await User.findOne({ employeeId: "HR-001" });
-  if (!hrUser) {
-    hrUser = await User.create({
-      employeeId: "HR-001",
-      email: "hr@vorldx.demo",
-      mobileNumber: "+919876543211",
-      passwordHash: hrPasswordHash,
-      role: UserRole.HR,
-      status: "ACTIVE",
-      isEmailVerified: true,
-    });
-    console.log(" Created Demo HR user: HR-001 (hr@vorldx.demo / +919876543211)");
-  } else {
-    hrUser.passwordHash = hrPasswordHash;
-    hrUser.role = UserRole.HR;
-    hrUser.mobileNumber = "+919876543211";
-    hrUser.status = "ACTIVE";
-    hrUser.isEmailVerified = true;
-    await hrUser.save();
-    console.log(" Updated Demo HR user: HR-001");
-  }
-
-  await Employee.findOneAndUpdate(
-    { employeeId: "HR-001" },
-    {
-      $set: {
-        employeeId: "HR-001",
-        name: "HR Operations Lead",
-        email: "hr@vorldx.demo",
-        mobileNumber: "+919876543211",
-        department: "Human Resources",
-        designation: "People Partner & HR Lead",
-        workType: WorkType.FULL_TIME,
-        shiftId: shiftIds[0],
-        joiningDate: "2022-02-01",
-        isActive: true,
-        userId: hrUser._id,
-      },
-    },
-    { upsert: true, new: true }
-  );
-
-  await Employee.findOneAndUpdate(
-    { employeeId: "HR-001" },
-    {
-      $set: {
-        employeeId: "HR-001",
-        name: "Ananya Sharma",
-        email: "hr@vorldx.demo",
-        department: "Human Resources",
-        designation: "HR Lead & People Ops",
-        workType: WorkType.FULL_TIME,
-        shiftId: shiftIds[0],
-        joiningDate: "2022-06-01",
-        isActive: true,
-        userId: hrUser._id,
-      },
-    },
-    { upsert: true, new: true }
-  );
-
-  // 6. Seed 25 Dummy Employees
+  // 4. Seed 25 Dummy Employees. Privileged accounts are provisioned separately.
   const employeePassword = env.EMPLOYEE_DEFAULT_PASSWORD;
   const employeePasswordHash = await hashPassword(employeePassword);
 
@@ -524,6 +390,57 @@ export async function runSeed(): Promise<void> {
     );
 
     createdCount++;
+  }
+
+  // Keep one sample roster record available for a first-time mobile/web OTP demo.
+  // It intentionally has no User account; registration links the account only
+  // after the OTP is verified. If that sample was already registered, keep its
+  // history intact and provision the next unused demo identity instead.
+  let registrationDemoEmployee = await Employee.findOne({
+    designation: "Registration Demo Employee",
+    isActive: true,
+    userId: null,
+  });
+  if (
+    registrationDemoEmployee &&
+    (await User.exists({ employeeId: registrationDemoEmployee.employeeId }))
+  ) {
+    registrationDemoEmployee = null;
+  }
+
+  if (!registrationDemoEmployee) {
+    let suffix = 1;
+    let employeeId = "";
+    let email = "";
+    while (true) {
+      const serial = suffix.toString().padStart(3, "0");
+      employeeId = `DEMO-OTP-${serial}`;
+      email = `registration.demo.${serial}@vorldx.demo`;
+      const [employeeExists, userById, userByEmail] = await Promise.all([
+        Employee.exists({ $or: [{ employeeId }, { email }] }),
+        User.exists({ employeeId }),
+        User.exists({ email }),
+      ]);
+      if (!employeeExists && !userById && !userByEmail) break;
+      suffix += 1;
+    }
+
+    registrationDemoEmployee = await Employee.create({
+      employeeId,
+      name: "Sample Registration Employee",
+      email,
+      department: "Demonstration",
+      designation: "Registration Demo Employee",
+      workType: WorkType.FULL_TIME,
+      shiftId: shiftIds[0],
+      joiningDate: "2026-01-01",
+      isActive: true,
+    });
+    console.log(` Created unlinked demo registration employee: ${employeeId}`);
+  } else {
+    console.log(
+      ` Reusing unlinked demo registration employee: ${registrationDemoEmployee.employeeId}`
+    );
   }
 
   console.log(` Created/Updated ${createdCount} realistic dummy employees across 5 departments.`);

@@ -52,6 +52,8 @@ export const listMyRequests = asyncHandler(async (req: Request, res: Response) =
   const result = await wfhService.listMyWfhRequests(req.user.userId, {
     status: req.query.status as string | undefined,
     month: req.query.month as string | undefined,
+    startDate: req.query.startDate as string | undefined,
+    endDate: req.query.endDate as string | undefined,
     page: req.query.page ? parseInt(req.query.page as string, 10) : 1,
     limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 20,
   });
@@ -85,6 +87,8 @@ export const listAllRequests = asyncHandler(async (req: Request, res: Response) 
     department: req.query.department as string | undefined,
     month: req.query.month as string | undefined,
     search: req.query.search as string | undefined,
+    startDate: req.query.startDate as string | undefined,
+    endDate: req.query.endDate as string | undefined,
     page: req.query.page ? parseInt(req.query.page as string, 10) : 1,
     limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 20,
   };

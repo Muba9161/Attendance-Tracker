@@ -38,10 +38,8 @@ export default function RegisterScreen() {
 
     try {
       const res = await registerStart(cleanId);
-      const raw = res as unknown as Record<string, string | undefined>;
-      const targetEmpId = res.data?.employeeId || raw.employeeId || cleanId;
-      const targetEmail = res.data?.maskedEmail || raw.maskedEmail || raw.email || 'registered email';
-      const targetOtp = res.data?.simulatedOtp || raw.simulatedDemoOtp || raw.simulatedOtp || '';
+      const targetEmpId = res.data?.employeeId || cleanId;
+      const targetEmail = res.data?.maskedEmail || 'registered email';
 
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
 
@@ -50,7 +48,6 @@ export default function RegisterScreen() {
         params: {
           employeeId: targetEmpId,
           maskedEmail: targetEmail,
-          simulatedOtp: targetOtp,
         },
       });
     } catch (err: unknown) {

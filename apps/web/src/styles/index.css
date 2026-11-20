@@ -3,25 +3,82 @@
 @tailwind utilities;
 
 @layer base {
+  #root :is(h1, h2, h3, h4, h5, h6, p, span, strong, em, small, li) {
+    cursor: default !important;
+  }
+
+  #root :is(button, a, [role='button']) {
+    cursor: pointer !important;
+  }
+
+  #root :is(button, a, [role='button']) * {
+    cursor: pointer !important;
+  }
+
+  #root :is(input, textarea, [contenteditable='true']) {
+    cursor: text !important;
+  }
+
+  body {
+    cursor: default;
+  }
+
+  button,
+  a,
+  [role='button'] {
+    cursor: pointer;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'] {
+    cursor: text;
+  }
+}
+
+/* Keep the dashboard department card responsive to its grid column width. */
+.department-performance-card {
+  container: department-performance / inline-size;
+}
+
+.department-performance-header > :first-child,
+.department-performance-header > :first-child > :last-child {
+  min-width: 0;
+}
+
+@container department-performance (min-width: 40rem) {
+  .department-performance-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+@layer base {
   :root {
     /* Color Tokens - Light Mode */
-    --bg-base: #f8fafc;        /* slate-50 */
+    --brand-ocean: #147fb5;
+    --brand-teal: #32bda8;
+    --brand-deep: #263d59;
+    --brand-charcoal: #62666b;
+    --brand-light: #f3f8fa;
+    --bg-base: #f3f8fa;
     --bg-surface: #ffffff;     /* white */
     --bg-card: #ffffff;        /* white */
-    --bg-muted: #f1f5f9;       /* slate-100 */
-    --bg-hover: #e2e8f0;       /* slate-200 */
+    --bg-muted: #eaf2f5;
+    --bg-hover: #dceaf0;
     --bg-overlay: rgba(15, 23, 42, 0.4);
 
-    --text-primary: #0f172a;   /* slate-900 (Contrast 16.1:1 on #FFFFFF) */
-    --text-secondary: #475569; /* slate-600 (Contrast 5.9:1 on #FFFFFF) */
-    --text-muted: #64748b;     /* slate-500 (Contrast 4.6:1 on #FFFFFF) */
+    --text-primary: #263d59;
+    --text-secondary: #43586b;
+    --text-muted: #62666b;
     --text-inverse: #ffffff;
 
-    --border-subtle: #f1f5f9;  /* slate-100 */
-    --border-base: #e2e8f0;    /* slate-200 */
-    --border-strong: #cbd5e1;  /* slate-300 */
+    --border-subtle: #eaf2f5;
+    --border-base: #d8e5eb;
+    --border-strong: #b8ccd6;
 
-    --ring-color: #2563eb;     /* blue-600 */
+    --ring-color: #147fb5;
     --ring-offset: #ffffff;
 
     /* Spacing Tokens */
@@ -64,24 +121,24 @@
 
   .dark {
     /* Color Tokens - Dark Mode */
-    --bg-base: #0b0f19;        /* Deep midnight */
-    --bg-surface: #111827;     /* slate-900 */
-    --bg-card: #162032;        /* elevated dark slate */
-    --bg-muted: #1e293b;       /* slate-800 */
-    --bg-hover: #273549;       /* slate-700 */
+    --bg-base: #142538;
+    --bg-surface: #1a3045;
+    --bg-card: #1d354b;
+    --bg-muted: #263d59;
+    --bg-hover: #324d68;
     --bg-overlay: rgba(3, 7, 18, 0.75);
 
-    --text-primary: #f8fafc;   /* slate-50 (Contrast 16.5:1 on #0B0F19) */
-    --text-secondary: #cbd5e1; /* slate-300 (Contrast 10.4:1 on #0B0F19) */
-    --text-muted: #94a3b8;     /* slate-400 (Contrast 5.9:1 on #0B0F19) */
+    --text-primary: #ffffff;
+    --text-secondary: #d4e0e8;
+    --text-muted: #a9bac7;
     --text-inverse: #0f172a;
 
-    --border-subtle: #1e293b;  /* slate-800 */
-    --border-base: #334155;    /* slate-700 */
-    --border-strong: #475569;  /* slate-600 */
+    --border-subtle: #263d59;
+    --border-base: #36536d;
+    --border-strong: #4d6a83;
 
-    --ring-color: #3b82f6;     /* blue-500 */
-    --ring-offset: #0b0f19;
+    --ring-color: #32bda8;
+    --ring-offset: #142538;
 
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
@@ -96,8 +153,26 @@
     @apply antialiased font-sans min-h-screen transition-colors duration-200;
   }
 
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  body {
+    overflow-x: clip;
+  }
+
+  img,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+
   /* High-Contrast Accessible Keyboard Focus Rings (WCAG AA Compliant) */
-  :focus-visible {
+  :focus-visible:not(input):not(textarea):not(select) {
     outline: 2px solid var(--ring-color) !important;
     outline-offset: 2px !important;
   }
@@ -105,7 +180,7 @@
 
 @layer components {
   .table-container {
-    @apply w-full overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm;
+    @apply w-full min-w-0 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm;
   }
   .table-base {
     @apply w-full text-left border-collapse text-sm;
@@ -165,6 +240,274 @@
 
   .animate-page-enter {
     animation: fadeInPage 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+}
+
+/* Responsive safeguards shared by the existing Admin pages. */
+[class*="overflow-x-auto"] {
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+#main-content .grid > *,
+#main-content .flex > * {
+  min-width: 0;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+/* Shared filter controls must be able to shrink inside grid and flex layouts. */
+#main-content input:not([type="checkbox"]):not([type="radio"]),
+#main-content select {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Keep dialog panels inside short and narrow mobile viewports. */
+[role="dialog"] > .relative.w-full {
+  min-width: 0;
+  max-width: calc(100vw - 1rem);
+}
+
+[role="dialog"] h1,
+[role="dialog"] h2,
+[role="dialog"] h3,
+[role="dialog"] p,
+[role="dialog"] label {
+  overflow-wrap: anywhere;
+}
+
+/* Popovers with fixed Tailwind widths should stay attached to the viewport. */
+[role="region"][aria-label] {
+  max-width: calc(100vw - 1rem);
+}
+
+.recharts-responsive-container,
+.recharts-wrapper {
+  max-width: 100%;
+}
+
+@media (max-width: 1279px) {
+  /* Keep every Leave Request column readable on tablets and compact laptops. */
+  .leave-requests-table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .leave-requests-table-scroll > .leave-requests-table {
+    min-width: 48rem;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Give composer tabs their own row and move the helper copy below them. */
+  .announcement-composer-tabs {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .announcement-composer-tab-list {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .announcement-composer-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 2.5rem;
+    justify-content: center;
+    padding: 0.5rem;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .announcement-composer-hint {
+    width: 100%;
+    line-height: 1.4;
+  }
+
+  .announcement-composer-actions {
+    flex-wrap: wrap;
+  }
+
+  /* Keep filter controls within the available content width on phones. */
+  #main-content select {
+    width: 100%;
+    max-width: 100%;
+    text-overflow: ellipsis;
+  }
+
+  #main-content option {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 0.5rem;
+    font-size: 0.8125rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* In supporting browsers, bind the native picker to its field instead of
+     letting the longest option determine a popup wider than the filter panel. */
+  @supports (appearance: base-select) and (width: anchor-size(width)) {
+    #main-content select,
+    #main-content select::picker(select) {
+      appearance: base-select;
+    }
+
+    #main-content select {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #main-content select::picker(select) {
+      width: anchor-size(width);
+      max-width: calc(100vw - 1rem);
+      max-height: min(18rem, 50dvh);
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      margin-block: 0.25rem;
+      padding: 0.25rem;
+      border: 1px solid var(--border-base);
+      border-radius: var(--radius-lg);
+      background-color: var(--bg-surface);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-xl);
+    }
+
+    #main-content select option {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      padding: 0.5rem 0.625rem;
+      border-radius: var(--radius-sm);
+      background-color: var(--bg-surface);
+      color: var(--text-primary);
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    #main-content select option:checked {
+      background-color: var(--ring-color);
+      color: #fff;
+    }
+
+    #main-content select option:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-primary);
+    }
+  }
+
+  #main-content input[type="date"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .leave-date-range > input {
+    flex: 1 1 0;
+  }
+
+  /* Lay status filters out as spaced touch targets instead of one crowded strip. */
+  .leave-status-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+    overflow: visible;
+    border-bottom: 0;
+  }
+
+  .leave-status-filter {
+    display: flex;
+    min-width: 0;
+    min-height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0.375rem 0.25rem;
+    border-width: 1px;
+    border-radius: 0.5rem;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .leave-requests-pagination {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .leave-requests-pagination > span {
+    flex: 1 1 100%;
+  }
+
+  .leave-requests-pagination > div {
+    margin-left: auto;
+  }
+
+  /* Keep all seven Team Overlay columns readable on narrow touch screens. */
+  .leave-team-calendar__grid {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .leave-team-calendar__weekdays,
+  .leave-team-calendar__days {
+    min-width: 35rem;
+  }
+
+  .leave-team-calendar__day-heading {
+    gap: 0.25rem;
+  }
+
+  .leave-team-calendar__count {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .leave-team-calendar__event {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  /* Data tables retain every column and use their existing scroll wrappers. */
+  .overflow-x-auto > table,
+  .table-container > table {
+    min-width: 38rem;
+  }
+
+  /* Tailwind's max-w-sm toast is narrower than the viewport with safe gutters. */
+  [class*="max-w-sm"][class*="bottom-4"][class*="right-4"] {
+    right: max(0.5rem, env(safe-area-inset-right));
+    bottom: max(0.5rem, env(safe-area-inset-bottom));
+    width: min(24rem, calc(100vw - 1rem - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  /* The notification menu uses a fixed 20rem width on wider screens. */
+  [role="region"][aria-label="Active Notifications"] {
+    width: calc(100vw - 1rem);
+    right: -0.25rem;
+  }
+}
+
+@media (max-width: 359px) {
+  [role="dialog"] > .relative.w-full {
+    max-width: calc(100vw - 0.5rem);
+  }
+
+  .leave-date-range {
+    flex-direction: column;
   }
 }
 

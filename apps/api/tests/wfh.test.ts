@@ -12,9 +12,11 @@ import {
   Holiday,
   WfhRequest,
   AuditEvent,
+  Notification,
 } from "../src/models";
 import { ApiErrorCode, AttendanceStatus, UserRole, WorkType, WfhStatus } from "@vorldx/shared";
 import { env } from "../src/config/env";
+import { createNotificationOnce } from "../src/services/notification.service";
 
 describe("Work From Home (WFH) Management Module", () => {
   let employeeUser: IUser;
@@ -38,6 +40,7 @@ describe("Work From Home (WFH) Management Module", () => {
     await Employee.deleteMany({});
     await User.deleteMany({});
     await AuditEvent.deleteMany({});
+    await Notification.deleteMany({});
 
     // 1. Create Default Attendance Policy with WFH Rules
     await AttendancePolicy.create({
@@ -198,6 +201,13 @@ describe("Work From Home (WFH) Management Module", () => {
 
   describe("Submitting WFH Requests (POST /api/wfh/requests)", () => {
     it("successfully creates a pending WFH request with advance notice on a working day", async () => {
+      const adminUser = await User.create({
+        employeeId: "ADMIN-9002",
+        email: "admin.review@vorldx.demo",
+        passwordHash: "dummyHash",
+        role: UserRole.ADMIN,
+        status: "ACTIVE",
+      });
       // simulatedNow is 2026-10-21 (Wed). Requesting 2026-10-22 (Thu) -> 1 day advance, workday
       const res = await request(app)
         .post("/api/wfh/requests")
@@ -213,6 +223,26 @@ describe("Work From Home (WFH) Management Module", () => {
       expect(res.body.request.status).toBe(WfhStatus.PENDING);
       expect(res.body.request.dateKey).toBe("2026-10-22");
       expect(res.body.request.employeeId).toBe("EMP-1001");
+
+      const notices = await Notification.find({ "payload.requestId": res.body.request._id });
+      expect(notices).toHaveLength(2);
+      expect(notices.map((notice) => notice.user.toString()).sort()).toEqual(
+        [hrUser._id.toString(), adminUser._id.toString()].sort()
+      );
+      const eventId = notices[0].eventId!;
+      await Promise.all(
+        notices.flatMap((notice) =>
+          [1, 2].map(() => createNotificationOnce({
+            userId: notice.user,
+            eventId,
+            type: "WFH_STATUS",
+            title: notice.title,
+            message: notice.message,
+            payload: notice.payload,
+          }))
+        )
+      );
+      expect(await Notification.countDocuments({ "payload.requestId": res.body.request._id })).toBe(2);
 
       // Verify AuditEvent recorded
       const audit = await AuditEvent.findOne({
@@ -498,6 +528,48 @@ describe("Work From Home (WFH) Management Module", () => {
       expect(res.body.pagination.total).toBe(1);
     });
 
+    it("returns every WFH overlay record within a range across paginated results", async () => {
+      const extraEmployees = await Employee.create([1, 2, 3].map((index) => ({
+        employeeId: `EMP-OVERLAY-${index}`,
+        name: `Overlay Employee ${index}`,
+        email: `overlay${index}@vorldx.demo`,
+        department: "Engineering",
+        designation: "Engineer",
+        workType: WorkType.FULL_TIME,
+        joiningDate: "2026-01-15",
+        isActive: true,
+      })));
+      const overlayEmployees = [employeeDoc, internDoc, ...extraEmployees];
+      const requests = overlayEmployees.flatMap((employee) =>
+        Array.from({ length: 21 }, (_, dayIndex) => {
+          const day = String(dayIndex + 1).padStart(2, "0");
+          return {
+            employee: employee._id,
+            employeeId: employee.employeeId,
+            department: employee.department,
+            dateKey: `2026-10-${day}`,
+            reason: "Approved calendar overlay record",
+            status: WfhStatus.APPROVED,
+          };
+        })
+      );
+      await WfhRequest.insertMany(requests);
+
+      const firstPage = await request(app)
+        .get("/api/wfh/admin/requests?status=APPROVED&startDate=2026-10-01&endDate=2026-10-21&page=1&limit=100")
+        .set("Authorization", `Bearer ${hrToken}`);
+      const secondPage = await request(app)
+        .get("/api/wfh/admin/requests?status=APPROVED&startDate=2026-10-01&endDate=2026-10-21&page=2&limit=100")
+        .set("Authorization", `Bearer ${hrToken}`);
+
+      expect(firstPage.status).toBe(200);
+      expect(firstPage.body.pagination.total).toBe(105);
+      expect(firstPage.body.data).toHaveLength(100);
+      expect(secondPage.status).toBe(200);
+      expect(secondPage.body.data).toHaveLength(5);
+      expect([...firstPage.body.data, ...secondPage.body.data]).toHaveLength(105);
+    });
+
     it("HR approval atomically approves request, credits 480 mins attendance, and logs audit", async () => {
       const res = await request(app)
         .patch(`/api/wfh/requests/${pendingReqId}/review`)
@@ -535,6 +607,38 @@ describe("Work From Home (WFH) Management Module", () => {
       expect(audit?.performedBy?.toString()).toBe(hrUser._id.toString());
       expect(audit?.metadata?.actorRole).toBe("HR");
       expect(audit?.newValue.status).toBe(WfhStatus.APPROVED);
+    });
+
+    it("does not approve WFH or overwrite attendance when office punches already exist", async () => {
+      const checkInTime = new Date("2026-10-22T03:30:00.000Z");
+      const checkOutTime = new Date("2026-10-22T12:30:00.000Z");
+      const attendance = await AttendanceRecord.create({
+        employee: employeeDoc._id,
+        employeeId: employeeDoc.employeeId,
+        department: employeeDoc.department,
+        dateKey: "2026-10-22",
+        checkInTime,
+        checkOutTime,
+        durationMinutes: 540,
+        status: AttendanceStatus.PRESENT,
+      });
+
+      const res = await request(app)
+        .patch(`/api/wfh/requests/${pendingReqId}/review`)
+        .set("Authorization", `Bearer ${hrToken}`)
+        .send({ status: WfhStatus.APPROVED, remarks: "Reviewed after office attendance" });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe(ApiErrorCode.ERR_BAD_REQUEST);
+      expect(await WfhRequest.findById(pendingReqId).then((record) => record?.status)).toBe(
+        WfhStatus.PENDING
+      );
+
+      const preservedAttendance = await AttendanceRecord.findById(attendance._id);
+      expect(preservedAttendance?.status).toBe(AttendanceStatus.PRESENT);
+      expect(preservedAttendance?.isWfh).toBe(false);
+      expect(preservedAttendance?.checkInTime?.getTime()).toBe(checkInTime.getTime());
+      expect(preservedAttendance?.checkOutTime?.getTime()).toBe(checkOutTime.getTime());
     });
 
     it("prevents double decision with 409 ERR_BAD_REQUEST when request was already decided", async () => {

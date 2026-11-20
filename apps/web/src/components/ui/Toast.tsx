@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Info, RotateCcw, X } from "lucide-react";
 import { useTheme } from "../../context/ThemeContext";
+import { acceptRecentEvent } from "../../utils/recentEventDedupe";
 
 export type ToastType = "success" | "error" | "info" | "undo";
 
@@ -20,6 +21,7 @@ interface ToastContextType {
     description?: string;
     durationMs?: number;
     onUndo?: () => void;
+    dedupeKey?: string;
   }) => void;
   success: (title: string, description?: string) => void;
   error: (title: string, description?: string) => void;
@@ -126,6 +128,7 @@ const ToastItem: React.FC<{
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const recentDedupeKeys = useRef(new Set<string>());
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -138,13 +141,16 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       description,
       durationMs,
       onUndo,
+      dedupeKey,
     }: {
       type?: ToastType;
       title: string;
       description?: string;
       durationMs?: number;
       onUndo?: () => void;
+      dedupeKey?: string;
     }) => {
+      if (!acceptRecentEvent(recentDedupeKeys.current, dedupeKey)) return;
       const id = Math.random().toString(36).substring(2, 9);
       const newToast: ToastMessage = { id, type, title, description, durationMs, onUndo };
       setToasts((prev) => [...prev, newToast]);
@@ -152,17 +158,25 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     []
   );
 
+  const success = useCallback((title: string, description?: string) => {
+    addToast({ type: "success", title, description });
+  }, [addToast]);
+  const error = useCallback((title: string, description?: string) => {
+    addToast({ type: "error", title, description });
+  }, [addToast]);
+  const info = useCallback((title: string, description?: string) => {
+    addToast({ type: "info", title, description });
+  }, [addToast]);
+  const undo = useCallback((title: string, onUndo: () => void, description?: string, durationMs = 5000) => {
+    addToast({ type: "undo", title, description, onUndo, durationMs });
+  }, [addToast]);
+  const contextValue = useMemo(
+    () => ({ toast: addToast, success, error, info, undo }),
+    [addToast, success, error, info, undo]
+  );
+
   return (
-    <ToastContext.Provider
-      value={{
-        toast: addToast,
-        success: (title, description) => addToast({ type: "success", title, description }),
-        error: (title, description) => addToast({ type: "error", title, description }),
-        info: (title, description) => addToast({ type: "info", title, description }),
-        undo: (title, onUndo, description, durationMs = 5000) =>
-          addToast({ type: "undo", title, description, onUndo, durationMs }),
-      }}
-    >
+    <ToastContext.Provider value={contextValue}>
       {children}
       {/* Toast Render Container */}
       <div

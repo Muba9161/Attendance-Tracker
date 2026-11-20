@@ -28,7 +28,7 @@ const StaffInvitationSchema = new Schema<IStaffInvitation>(
     },
     role: {
       type: String,
-      enum: [UserRole.HR, UserRole.ADMIN, UserRole.HR_ADMIN],
+      enum: [UserRole.HR],
       default: UserRole.HR,
       required: true,
     },

@@ -47,6 +47,8 @@ exports.WfhFilterQuerySchema = zod_1.z.object({
         .string()
         .regex(/^\d{4}-\d{2}$/, "Month must be in YYYY-MM format")
         .optional(),
+    startDate: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    endDate: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     search: zod_1.z.string().trim().optional(),
     page: zod_1.z.coerce.number().int().positive().default(1),
     limit: zod_1.z.coerce.number().int().positive().max(100).default(20),

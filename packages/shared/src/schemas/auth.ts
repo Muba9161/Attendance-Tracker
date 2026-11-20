@@ -116,7 +116,8 @@ export function isPasswordStrong(password: string): boolean {
 }
 
 export const SignupRequestSchema = z.object({
-  email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+  employeeId: z.string().trim().min(3, "Employee ID must be at least 3 characters").max(20).optional(),
+  email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase().optional(),
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
@@ -124,8 +125,30 @@ export const SignupRequestSchema = z.object({
     .refine(isPasswordStrong, {
       message: "Password must contain at least one uppercase letter, one lowercase letter, and one number or special character",
     }),
-  name: z.string().trim().min(2, "Full name must be at least 2 characters").max(100),
+  name: z.string().trim().min(2, "Full name must be at least 2 characters").max(100).optional(),
   inviteToken: z.string().trim().optional(),
+}).superRefine((data, context) => {
+  if (!data.inviteToken && !data.employeeId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["employeeId"],
+      message: "Employee ID is required for employee registration.",
+    });
+  }
+  if (data.inviteToken && !data.email) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["email"],
+      message: "Email is required to accept a staff invitation.",
+    });
+  }
+  if (data.inviteToken && !data.name) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["name"],
+      message: "Name is required to accept a staff invitation.",
+    });
+  }
 });
 export type SignupRequest = z.infer<typeof SignupRequestSchema>;
 
@@ -153,6 +176,15 @@ export type VerifyEmailRequest = z.infer<typeof VerifyEmailRequestSchema>;
 
 export const ResendVerificationRequestSchema = z.object({
   email: z.string().trim().email("Please provide a valid corporate email address").toLowerCase(),
+});
+
+export const VerifySignupOtpRequestSchema = z.object({
+  email: z.string().trim().email().toLowerCase(),
+  otp: z.string().trim().regex(/^\d{6}$/, "OTP must contain exactly 6 digits"),
+});
+
+export const ResendSignupOtpRequestSchema = z.object({
+  email: z.string().trim().email().toLowerCase(),
 });
 export type ResendVerificationRequest = z.infer<typeof ResendVerificationRequestSchema>;
 

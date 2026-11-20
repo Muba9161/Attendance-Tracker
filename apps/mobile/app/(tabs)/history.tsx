@@ -33,13 +33,14 @@ import {
 } from '../../src/components';
 import { colors, radii, spacing, type Tone } from '../../src/theme/tokens';
 import { useResponsive } from '../../src/lib/responsive';
+import { getCalendarDateKey, getLocalDateKey } from '../../src/lib/date';
 import {
   attendanceApi,
   AttendanceRecordItem,
   AttendanceStats,
   holidayApi,
 } from '../../src/services';
-import { DEFAULT_CORPORATE_HOLIDAYS_2026 } from '../holidays';
+import type { UnifiedCalendarEvent } from '../holidays';
 
 function formatTime(isoString?: string | null): string {
   if (!isoString) return '—';
@@ -71,37 +72,43 @@ export default function HistoryScreen() {
 
   const [selectedMonth, setSelectedMonth] = useState(() => new Date());
   const [selectedDateKey, setSelectedDateKey] = useState(() => {
-    return new Date().toISOString().split('T')[0];
+    return getLocalDateKey();
   });
   const [activeFilter, setActiveFilter] = useState<FilterType>('ALL');
 
   const [records, setRecords] = useState<AttendanceRecordItem[]>([]);
   const [stats, setStats] = useState<AttendanceStats | null>(null);
-  const [calendarEvents, setCalendarEvents] = useState<any[]>(DEFAULT_CORPORATE_HOLIDAYS_2026);
+  const [calendarEvents, setCalendarEvents] = useState<UnifiedCalendarEvent[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    holidayApi.getCalendarEvents(new Date().getFullYear())
-      .then((res) => {
-        if (!isMounted || !res.success || !Array.isArray(res.data) || res.data.length === 0) return;
-        const list: any[] = [];
-        for (const evt of res.data) {
-          const dateKey = new Date(evt.startDate).toISOString().split('T')[0];
-          list.push({
-            _id: evt._id,
-            name: evt.title,
-            dateKey,
-            type: evt.type,
-            description: evt.description,
-          });
-        }
-        if (list.length > 0) setCalendarEvents(list);
-      })
-      .catch(() => {});
-    return () => {
-      isMounted = false;
-    };
+  const fetchCalendarEvents = useCallback(async () => {
+    setCalendarLoading(true);
+    setCalendarError(null);
+    try {
+      const res = await holidayApi.getCalendarEvents(new Date().getFullYear());
+      if (!res?.success || !Array.isArray(res.data)) throw new Error('Calendar request failed.');
+      setCalendarEvents(res.data.map((evt) => ({
+        _id: evt._id,
+        name: evt.title,
+        dateKey: getCalendarDateKey(evt.startDate),
+        type: evt.type,
+        description: evt.description || '',
+        isFullDay: evt.isFullDay,
+        endDateKey: getCalendarDateKey(evt.endDate),
+        location: evt.location,
+        startTime: evt.startTime,
+        endTime: evt.endTime,
+      })));
+    } catch {
+      setCalendarEvents([]);
+      setCalendarError('Company calendar could not be loaded. Retry when the service is available.');
+    } finally {
+      setCalendarLoading(false);
+    }
   }, []);
+
+  useEffect(() => { void fetchCalendarEvents(); }, [fetchCalendarEvents]);
 
   // Next upcoming corporate calendar teaser (dynamically derived from backend events)
   const nextCalendarTeaser = useMemo(() => {
@@ -121,7 +128,11 @@ export default function HistoryScreen() {
     const next = upcoming[0];
     if (!next) {
       return {
-        subtitle: 'Holidays, hackathons, sessions & town halls',
+        subtitle: calendarError
+          ? 'Calendar unavailable'
+          : calendarLoading
+            ? 'Loading company calendar…'
+            : 'No upcoming calendar events',
       };
     }
 
@@ -139,7 +150,7 @@ export default function HistoryScreen() {
     const subtitle = `${next.name} (${dayStr}) • ${typeLabel}${isLongWeekend ? ' • Long Weekend' : ''}`;
 
     return { subtitle };
-  }, [calendarEvents]);
+  }, [calendarEvents, calendarError, calendarLoading]);
 
   const monthKey = `${selectedMonth.getFullYear()}-${String(selectedMonth.getMonth() + 1).padStart(2, '0')}`;
 
@@ -168,7 +179,7 @@ export default function HistoryScreen() {
   const goToToday = () => {
     const today = new Date();
     setSelectedMonth(today);
-    setSelectedDateKey(today.toISOString().split('T')[0]);
+    setSelectedDateKey(getLocalDateKey(today));
     void Haptics.selectionAsync().catch(() => undefined);
   };
 
@@ -242,6 +253,13 @@ export default function HistoryScreen() {
 
       <View style={[styles.container, isWide && styles.containerWide]}>
         {error ? <Notice tone="danger" title="Load Error" message={error} /> : null}
+        {calendarError ? (
+          <View style={{ marginBottom: spacing.md }}>
+            <Notice tone="danger" title="Calendar unavailable" message={calendarError} />
+            <Button label="Retry calendar" size="sm" variant="secondary" fullWidth={false} onPress={fetchCalendarEvents} />
+          </View>
+        ) : null}
+        {calendarLoading && !calendarError ? <Text variant="caption" color={colors.muted}>Loading company calendar…</Text> : null}
 
         {/* ============================================================= */}
         {/* COMPANY CALENDAR, SESSIONS & EVENTS BUTTON */}
@@ -249,7 +267,7 @@ export default function HistoryScreen() {
         <PressableScale
           onPress={() => {
             void Haptics.selectionAsync().catch(() => undefined);
-            router.push('/holidays' as any);
+            router.push('/holidays');
           }}
           style={styles.upcomingHolidaysBtn}
           haptic="selection"
@@ -371,6 +389,16 @@ export default function HistoryScreen() {
                 <Text variant="small" color={colors.warning}>
                   Arrived {selectedRecord.lateMinutes} minutes past shift grace period
                 </Text>
+              </View>
+            ) : null}
+
+            {selectedRecord.isEarlyCheckout ? (
+              <View style={styles.noteRow}>
+                <AlertCircle size={13} color={colors.warning} />
+                <View style={{ flex: 1 }}>
+                  <Text variant="small" color={colors.warning}>Early checkout · scheduled end {selectedRecord.scheduledShiftEndTime ? formatTime(selectedRecord.scheduledShiftEndTime) : 'unavailable'}</Text>
+                  <Text variant="small" color={colors.textSecondary}>Reason: {selectedRecord.earlyCheckoutReason || 'No reason recorded'}</Text>
+                </View>
               </View>
             ) : null}
 
@@ -557,7 +585,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: 'rgba(11, 14, 25, 0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(184, 190, 255, 0.08)',
+    borderColor: 'rgba(184, 204, 214, 0.08)',
   },
   timeCell: {
     flex: 1,
@@ -606,7 +634,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   recordItemSelected: {
-    backgroundColor: 'rgba(89, 101, 242, 0.08)',
+    backgroundColor: 'rgba(20, 127, 181, 0.08)',
   },
   rowDivider: {
     borderTopWidth: 1,

@@ -131,16 +131,16 @@ export const Globe3DStand: React.FC<Globe3DStandProps> = ({ size = 260 }) => {
           {/* Luminous Vibrant Stand Gradient (App Theme: Indigo Soft to Cyber Lavender & Electric Cyan) */}
           <SvgLinearGradient id="standLuminous" x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0%" stopColor="#E2D4FF" stopOpacity="1" />
-            <Stop offset="30%" stopColor="#8C95FF" stopOpacity="1" />
-            <Stop offset="65%" stopColor="#76B8FF" stopOpacity="1" />
-            <Stop offset="100%" stopColor="#C4A7FF" stopOpacity="1" />
+            <Stop offset="30%" stopColor="#55A8CC" stopOpacity="1" />
+            <Stop offset="65%" stopColor="#147FB5" stopOpacity="1" />
+            <Stop offset="100%" stopColor="#32BDA8" stopOpacity="1" />
           </SvgLinearGradient>
 
           {/* Back Curved Rod Gradient (Bright & High Contrast) */}
           <SvgLinearGradient id="backRodLuminous" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0%" stopColor="#C4A7FF" stopOpacity="1" />
-            <Stop offset="45%" stopColor="#8C95FF" stopOpacity="1" />
-            <Stop offset="80%" stopColor="#76B8FF" stopOpacity="1" />
+            <Stop offset="0%" stopColor="#32BDA8" stopOpacity="1" />
+            <Stop offset="45%" stopColor="#55A8CC" stopOpacity="1" />
+            <Stop offset="80%" stopColor="#147FB5" stopOpacity="1" />
             <Stop offset="100%" stopColor="#A5F3FC" stopOpacity="1" />
           </SvgLinearGradient>
 
@@ -155,7 +155,7 @@ export const Globe3DStand: React.FC<Globe3DStandProps> = ({ size = 260 }) => {
           <RadialGradient id="pedestalAura" cx="50%" cy="50%" r="50%">
             <Stop offset="0%" stopColor="#7E8BFF" stopOpacity="0.65" />
             <Stop offset="45%" stopColor="#38BDF8" stopOpacity="0.25" />
-            <Stop offset="100%" stopColor="#07080E" stopOpacity="0" />
+            <Stop offset="100%" stopColor="#142538" stopOpacity="0" />
           </RadialGradient>
         </Defs>
 
@@ -268,7 +268,7 @@ export const Globe3DStand: React.FC<Globe3DStandProps> = ({ size = 260 }) => {
         {/* 3D Curvature Gradients, Specular Gleam & Night Shadow (Non-rotating overlay) */}
         {/* 1. Sunlight Directional Gleam (Top-Left Specular highlight) */}
         <LinearGradient
-          colors={['rgba(255, 255, 255, 0.45)', 'rgba(118, 184, 255, 0.15)', 'transparent']}
+          colors={['rgba(255, 255, 255, 0.45)', 'rgba(20, 127, 181, 0.15)', 'transparent']}
           start={{ x: 0.1, y: 0.1 }}
           end={{ x: 0.65, y: 0.65 }}
           style={StyleSheet.absoluteFill}
@@ -321,7 +321,7 @@ export const Globe3DStand: React.FC<Globe3DStandProps> = ({ size = 260 }) => {
         {/* 1. Neon Aura Glow */}
         <Path
           d="M 108 148 C 158 144 196 98 152 28"
-          stroke="#76B8FF"
+          stroke="#147FB5"
           strokeWidth="10"
           strokeOpacity="0.45"
           fill="none"
@@ -509,9 +509,9 @@ function SvgWorldMap({
         </SvgLinearGradient>
 
         <SvgLinearGradient id="gridLines" x1="0" y1="0" x2="1" y2="0">
-          <Stop offset="0%" stopColor="#76B8FF" stopOpacity="0.2" />
-          <Stop offset="50%" stopColor="#76B8FF" stopOpacity="0.45" />
-          <Stop offset="100%" stopColor="#76B8FF" stopOpacity="0.2" />
+          <Stop offset="0%" stopColor="#147FB5" stopOpacity="0.2" />
+          <Stop offset="50%" stopColor="#147FB5" stopOpacity="0.45" />
+          <Stop offset="100%" stopColor="#147FB5" stopOpacity="0.2" />
         </SvgLinearGradient>
       </Defs>
 
@@ -645,7 +645,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#070E20',
     borderWidth: 1.5,
     borderColor: 'rgba(126, 139, 255, 0.6)',
-    shadowColor: '#5965F2',
+    shadowColor: '#147FB5',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.6,
     shadowRadius: 18,
@@ -672,7 +672,7 @@ const styles = StyleSheet.create({
   atmosphericHalo: {
     position: 'absolute',
     borderWidth: 1.8,
-    borderColor: 'rgba(118, 184, 255, 0.65)',
+    borderColor: 'rgba(20, 127, 181, 0.65)',
     backgroundColor: 'transparent',
     shadowColor: '#38BDF8',
     shadowOffset: { width: 0, height: 0 },

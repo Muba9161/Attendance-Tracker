@@ -38,6 +38,7 @@ import {
 } from '../../src/components';
 import { colors, radii, spacing } from '../../src/theme/tokens';
 import { useResponsive } from '../../src/lib/responsive';
+import { getLocalDateKey } from '../../src/lib/date';
 import {
   wfhApi,
   WfhEligibilityResponse,
@@ -49,7 +50,7 @@ import {
 
 export default function WfhScreen() {
   const { showToast } = useToast();
-  const { isWide } = useResponsive();
+  const { isWide, width, height } = useResponsive();
 
   const [refreshing, setRefreshing] = useState(false);
   const [eligibility, setEligibility] = useState<WfhEligibilityResponse | null>(null);
@@ -60,7 +61,7 @@ export default function WfhScreen() {
   const [requestDate, setRequestDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
+    return getLocalDateKey(d);
   });
   const [requestReason, setRequestReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -197,7 +198,7 @@ export default function WfhScreen() {
       return;
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateKey();
     if (cleanDate < todayStr) {
       setFormError('Remote work requests cannot be submitted for past dates.');
       return;
@@ -298,13 +299,17 @@ export default function WfhScreen() {
         <Card variant="raised" padding={20} style={styles.quotaCard}>
           <View style={styles.quotaHeader}>
             <View style={styles.quotaTitleWrap}>
-              <Text variant="title">Monthly WFH Quota</Text>
+              <Text variant={width < 360 ? 'subheading' : 'title'} numberOfLines={2}>
+                Monthly WFH Quota
+              </Text>
             </View>
-            <Badge
-              label={isEligible ? 'Eligible' : 'Ineligible'}
-              tone={isEligible ? 'success' : 'danger'}
-              dot
-            />
+            <View style={styles.eligibilityBadgeWrap}>
+              <Badge
+                label={isEligible ? 'Eligible' : 'Ineligible'}
+                tone={isEligible ? 'success' : 'danger'}
+                dot
+              />
+            </View>
           </View>
 
           {/* Numbers Strip */}
@@ -349,10 +354,34 @@ export default function WfhScreen() {
                 ]}
               />
             </View>
-            <Text variant="small" color={colors.muted} align="center">
+            <Text
+              variant="small"
+              color={colors.muted}
+              align="center"
+              numberOfLines={2}
+              style={styles.progressLabel}
+            >
               {usedDays} of {totalQuota} days used ({remainingDays} available)
             </Text>
           </View>
+
+          {eligibility && (
+            <View style={{ marginTop: spacing.md }}>
+              {eligibility.rules ? (
+                <Text variant="small" color={colors.textSecondary}>
+                  {eligibility.rules}
+                  {eligibility.allowedDaysPerWeek !== undefined
+                    ? ` Up to ${eligibility.allowedDaysPerWeek} WFH days per week.`
+                    : ""}
+                </Text>
+              ) : null}
+              {(eligibility.reasons || []).map((reason) => (
+                <Text key={reason} variant="small" color={colors.danger}>
+                  {reason}
+                </Text>
+              ))}
+            </View>
+          )}
 
           {isEligible && (
             <Button
@@ -374,7 +403,9 @@ export default function WfhScreen() {
             <Card variant="glass" padding={20} style={styles.formCard}>
               <View style={styles.formHeader}>
                 <House size={18} color={colors.indigoSoft} />
-                <Text variant="subheading">Submit Remote Work Request</Text>
+                <Text variant="subheading" numberOfLines={2} style={styles.formTitle}>
+                  Submit Remote Work Request
+                </Text>
               </View>
 
               {formError ? <Notice tone="danger" title="Invalid Request" message={formError} /> : null}
@@ -398,7 +429,13 @@ export default function WfhScreen() {
                     <View style={styles.calendarIconBubble}>
                       <CalendarIcon size={16} color={colors.indigoSoft} strokeWidth={2.2} />
                     </View>
-                    <Text variant="body" weight="medium" color={colors.text}>
+                    <Text
+                      variant="body"
+                      weight="medium"
+                      color={colors.text}
+                      numberOfLines={2}
+                      style={styles.dateValue}
+                    >
                       {formattedTargetDate}
                     </Text>
                   </View>
@@ -465,8 +502,16 @@ export default function WfhScreen() {
           transparent
           onRequestClose={() => setShowDatePicker(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.datePickerModalCard}>
+          <View style={[styles.modalOverlay, { padding: width < 360 ? spacing.sm : spacing.md }]}>
+            <View
+              style={[
+                styles.datePickerModalCard,
+                {
+                  padding: width < 360 ? spacing.md : spacing.lg,
+                  maxHeight: height * 0.92,
+                },
+              ]}
+            >
               <View style={styles.modalHeader}>
                 <View style={styles.modalHeaderTitleWrap}>
                   <CalendarIcon size={18} color={colors.indigoSoft} strokeWidth={2.2} />
@@ -483,28 +528,34 @@ export default function WfhScreen() {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.calendarContainer}>
-                <Calendar
-                  month={pickerMonth}
-                  onMonthChange={setPickerMonth}
-                  selectedDate={requestDate}
-                  onSelectDate={(dateStr) => {
-                    const todayStr = new Date().toISOString().split('T')[0];
-                    if (dateStr < todayStr) {
-                      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
-                      showToast({
-                        title: 'Invalid Date',
-                        message: 'WFH cannot be requested for past dates.',
-                        type: 'warning',
-                      });
-                      return;
-                    }
-                    void Haptics.selectionAsync().catch(() => undefined);
-                    setRequestDate(dateStr);
-                    setShowDatePicker(false);
-                  }}
-                />
-              </View>
+              <ScrollView
+                style={[styles.calendarScroll, { maxHeight: height * 0.72 }]}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.calendarScrollContent}
+              >
+                <View style={styles.calendarContainer}>
+                  <Calendar
+                    month={pickerMonth}
+                    onMonthChange={setPickerMonth}
+                    selectedDate={requestDate}
+                    onSelectDate={(dateStr) => {
+                      const todayStr = getLocalDateKey();
+                      if (dateStr < todayStr) {
+                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
+                        showToast({
+                          title: 'Invalid Date',
+                          message: 'WFH cannot be requested for past dates.',
+                          type: 'warning',
+                        });
+                        return;
+                      }
+                      void Haptics.selectionAsync().catch(() => undefined);
+                      setRequestDate(dateStr);
+                      setShowDatePicker(false);
+                    }}
+                  />
+                </View>
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -534,7 +585,12 @@ export default function WfhScreen() {
                 >
                   <View style={styles.requestLeft}>
                     <View style={styles.requestDateRow}>
-                      <Text variant="bodyMedium" weight="semibold">
+                      <Text
+                        variant="bodyMedium"
+                        weight="semibold"
+                        numberOfLines={2}
+                        style={styles.requestDateText}
+                      >
                         {dateVal}
                       </Text>
                       <StatusBadge status={item.status} />
@@ -583,11 +639,17 @@ const styles = StyleSheet.create({
   },
   quotaHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
   },
   quotaTitleWrap: {
+    flex: 1,
+    minWidth: 0,
     gap: 3,
+  },
+  eligibilityBadgeWrap: {
+    flexShrink: 0,
   },
   numbersRow: {
     flexDirection: 'row',
@@ -598,10 +660,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: 'rgba(11, 14, 25, 0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(184, 190, 255, 0.08)',
+    borderColor: 'rgba(184, 204, 214, 0.08)',
+    minWidth: 0,
   },
   numberBox: {
     flex: 1,
+    minWidth: 0,
     alignItems: 'center',
     gap: 2,
   },
@@ -612,6 +676,10 @@ const styles = StyleSheet.create({
   },
   progressWrap: {
     gap: spacing.xs,
+  },
+  progressLabel: {
+    width: '100%',
+    flexShrink: 1,
   },
   progressBarBg: {
     width: '100%',
@@ -660,6 +728,10 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: spacing.xs,
   },
+  formTitle: {
+    flex: 1,
+    minWidth: 0,
+  },
   emptyCard: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -678,17 +750,24 @@ const styles = StyleSheet.create({
   },
   requestLeft: {
     flex: 1,
+    minWidth: 0,
     gap: 5,
   },
   requestDateRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
+  },
+  requestDateText: {
+    flexShrink: 1,
+    minWidth: 0,
   },
   remarks: {
     marginTop: 2,
   },
   cancelBtn: {
+    flexShrink: 0,
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderRadius: radii.sm,
@@ -700,8 +779,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 48,
+    minHeight: 48,
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
     borderRadius: radii.md,
     backgroundColor: 'rgba(17, 20, 34, 0.72)',
     borderWidth: 1,
@@ -712,12 +792,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     flex: 1,
+    minWidth: 0,
+  },
+  dateValue: {
+    flexShrink: 1,
+    minWidth: 0,
   },
   calendarIconBubble: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(89, 101, 242, 0.15)',
+    backgroundColor: 'rgba(20, 127, 181, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -739,7 +824,7 @@ const styles = StyleSheet.create({
   datePickerModalCard: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: '#0D101B',
+    backgroundColor: '#1D354B',
     borderRadius: radii.xl,
     padding: spacing.lg,
     borderWidth: 1,
@@ -755,6 +840,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  calendarScroll: {
+    flexShrink: 1,
+  },
+  calendarScrollContent: {
+    paddingBottom: spacing.xs,
   },
   modalCloseBtn: {
     width: 32,

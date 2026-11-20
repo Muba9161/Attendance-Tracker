@@ -45,7 +45,7 @@ export const CountdownRing: React.FC<CountdownRingProps> = ({
       style={{ width: size, height: size }}
       role="timer"
       aria-live="polite"
-      aria-label={`QR token rotates in ${displaySeconds} seconds`}
+      aria-label={`QR token expires in ${displaySeconds} seconds`}
     >
       <svg
         width={size}
@@ -84,7 +84,7 @@ export const CountdownRing: React.FC<CountdownRingProps> = ({
           <span className="text-xs font-semibold ml-0.5 opacity-80">s</span>
         </span>
         <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
-          Rotate
+          Expires
         </span>
       </div>
     </div>

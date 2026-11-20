@@ -16,7 +16,29 @@ const SENSITIVE_KEYS = new Set([
   "cookie",
   "accesstoken",
   "refreshtoken",
+  "verificationtoken",
+  "invitetoken",
 ]);
+
+const SENSITIVE_QUERY_KEY_PARTS = ["token", "secret", "password", "otp", "credential", "authorization"];
+
+export function sanitizeUrl(url: string): string {
+  try {
+    const parsed = new URL(url, "http://localhost");
+    for (const key of parsed.searchParams.keys()) {
+      const normalizedKey = key.toLowerCase();
+      if (
+        SENSITIVE_KEYS.has(normalizedKey) ||
+        SENSITIVE_QUERY_KEY_PARTS.some((part) => normalizedKey.includes(part))
+      ) {
+        parsed.searchParams.set(key, "[REDACTED]");
+      }
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * Recursively redacts sensitive fields from objects before logging

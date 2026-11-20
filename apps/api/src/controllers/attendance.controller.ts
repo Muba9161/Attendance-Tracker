@@ -17,12 +17,16 @@ export const scanAttendance = asyncHandler(async (req: Request, res: Response) =
     );
   }
 
-  const simulatedNow = req.body.simulatedNow ? new Date(req.body.simulatedNow) : undefined;
+  // Timestamp overrides are permitted only by automated tests; production always uses server time.
+  const simulatedNow = process.env.NODE_ENV === "test" && req.body.simulatedNow
+    ? new Date(req.body.simulatedNow)
+    : undefined;
 
   const result = await attendanceService.scanAttendance(req.user.userId, {
     token: req.body.token,
     qrPayload: req.body.qrPayload,
     action: req.body.action,
+    earlyCheckoutReason: req.body.earlyCheckoutReason,
     simulatedNow,
   });
 
@@ -38,7 +42,7 @@ export const getTodayAttendance = asyncHandler(async (req: Request, res: Respons
     throw new AppError(401, ApiErrorCode.ERR_UNAUTHORIZED, "Authentication required.");
   }
 
-  const simulatedNow = req.query.simulatedNow
+  const simulatedNow = process.env.NODE_ENV === "test" && req.query.simulatedNow
     ? new Date(req.query.simulatedNow as string)
     : undefined;
 
@@ -98,23 +102,14 @@ export const listAttendanceRecords = asyncHandler(async (req: Request, res: Resp
   res.status(200).json(result);
 });
 
-/**
- * PATCH /attendance/:id (and /attendance/:id/correct, /api/attendance/:id, /api/attendance/:id/correct)
- * HR/Admin: Manually corrects an attendance record with mandatory reason, validation, recalculation, and audit log.
- */
+/** PATCH /attendance/:id/correct — ADMIN-only audited correction. */
 export const correctAttendanceRecord = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user) {
-    throw new AppError(401, ApiErrorCode.ERR_UNAUTHORIZED, "Authentication required.");
-  }
-
-  const actor = {
+  if (!req.user) throw new AppError(401, ApiErrorCode.ERR_UNAUTHORIZED, "Authentication required.");
+  const result = await attendanceService.correctAttendanceRecord(req.params.id, req.body, {
     userId: req.user.userId,
     employeeId: req.user.employeeId,
     role: req.user.role,
-  };
-
-  const result = await attendanceService.correctAttendanceRecord(req.params.id, req.body, actor);
-
+  });
   res.status(200).json(result);
 });
 

@@ -13,26 +13,31 @@ export declare const AttendanceScanRequestSchema: z.ZodEffects<z.ZodObject<{
     qrPayload: z.ZodOptional<z.ZodString>;
     action: z.ZodOptional<z.ZodEnum<["CHECK_IN", "CHECK_OUT"]>>;
     simulatedNow: z.ZodOptional<z.ZodString>;
+    earlyCheckoutReason: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     qrPayload?: string | undefined;
     token?: string | undefined;
     action?: "CHECK_IN" | "CHECK_OUT" | undefined;
     simulatedNow?: string | undefined;
+    earlyCheckoutReason?: string | undefined;
 }, {
     qrPayload?: string | undefined;
     token?: string | undefined;
     action?: "CHECK_IN" | "CHECK_OUT" | undefined;
     simulatedNow?: string | undefined;
+    earlyCheckoutReason?: string | undefined;
 }>, {
     qrPayload?: string | undefined;
     token?: string | undefined;
     action?: "CHECK_IN" | "CHECK_OUT" | undefined;
     simulatedNow?: string | undefined;
+    earlyCheckoutReason?: string | undefined;
 }, {
     qrPayload?: string | undefined;
     token?: string | undefined;
     action?: "CHECK_IN" | "CHECK_OUT" | undefined;
     simulatedNow?: string | undefined;
+    earlyCheckoutReason?: string | undefined;
 }>;
 export type AttendanceScanRequest = z.infer<typeof AttendanceScanRequestSchema>;
 export declare const AttendanceRecordSchema: z.ZodObject<{
@@ -55,7 +60,6 @@ export declare const AttendanceRecordSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     status: AttendanceStatus;
     _id: string;
-    createdAt: string;
     employeeId: string;
     dateKey: string;
     checkInTime: string | null;
@@ -65,19 +69,19 @@ export declare const AttendanceRecordSchema: z.ZodObject<{
     lateMinutes: number;
     isMissingCheckout: boolean;
     isManuallyCorrected: boolean;
-    updatedAt?: string | undefined;
+    createdAt: string;
     departmentId?: string | undefined;
     terminalId?: string | undefined;
     systemNotes?: string | undefined;
+    updatedAt?: string | undefined;
 }, {
     status: AttendanceStatus;
     _id: string;
-    createdAt: string;
     employeeId: string;
     dateKey: string;
     checkInTime: string | null;
     checkOutTime: string | null;
-    updatedAt?: string | undefined;
+    createdAt: string;
     departmentId?: string | undefined;
     durationMinutes?: number | undefined;
     isLate?: boolean | undefined;
@@ -86,6 +90,7 @@ export declare const AttendanceRecordSchema: z.ZodObject<{
     isManuallyCorrected?: boolean | undefined;
     terminalId?: string | undefined;
     systemNotes?: string | undefined;
+    updatedAt?: string | undefined;
 }>;
 export type AttendanceRecord = z.infer<typeof AttendanceRecordSchema>;
 export declare const AttendanceTodayResponseSchema: z.ZodObject<{
@@ -160,9 +165,9 @@ export declare const AttendanceHistoryQuerySchema: z.ZodObject<{
     month?: string | undefined;
 }, {
     status?: AttendanceStatus | undefined;
+    month?: string | undefined;
     page?: number | undefined;
     limit?: number | undefined;
-    month?: string | undefined;
 }>;
 export type AttendanceHistoryQuery = z.infer<typeof AttendanceHistoryQuerySchema>;
 export declare const AttendanceStatsResponseSchema: z.ZodObject<{
@@ -210,72 +215,62 @@ export declare const AttendanceFilterQuerySchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     page: number;
     limit: number;
-    sortBy: "status" | "createdAt" | "employeeId" | "dateKey";
+    sortBy: "status" | "employeeId" | "dateKey" | "createdAt";
     sortOrder: "asc" | "desc";
     status?: AttendanceStatus | undefined;
-    employee?: string | undefined;
+    employeeId?: string | undefined;
+    dateKey?: string | undefined;
     startDate?: string | undefined;
     endDate?: string | undefined;
-    employeeId?: string | undefined;
-    department?: string | undefined;
-    search?: string | undefined;
-    dateKey?: string | undefined;
     from?: string | undefined;
     to?: string | undefined;
+    department?: string | undefined;
+    employee?: string | undefined;
     workType?: string | undefined;
+    search?: string | undefined;
 }, {
     status?: AttendanceStatus | undefined;
-    employee?: string | undefined;
-    startDate?: string | undefined;
-    endDate?: string | undefined;
     employeeId?: string | undefined;
-    department?: string | undefined;
-    search?: string | undefined;
+    dateKey?: string | undefined;
     page?: number | undefined;
     limit?: number | undefined;
-    dateKey?: string | undefined;
+    startDate?: string | undefined;
+    endDate?: string | undefined;
     from?: string | undefined;
     to?: string | undefined;
+    department?: string | undefined;
+    employee?: string | undefined;
     workType?: string | undefined;
-    sortBy?: "status" | "createdAt" | "employeeId" | "dateKey" | undefined;
+    search?: string | undefined;
+    sortBy?: "status" | "employeeId" | "dateKey" | "createdAt" | undefined;
     sortOrder?: "asc" | "desc" | undefined;
 }>;
 export type AttendanceFilterQuery = z.infer<typeof AttendanceFilterQuerySchema>;
 export declare const AttendanceCorrectionRequestSchema: z.ZodEffects<z.ZodObject<{
-    status: z.ZodOptional<z.ZodNativeEnum<typeof AttendanceStatus>>;
+    status: z.ZodOptional<z.ZodEnum<[AttendanceStatus.PRESENT, AttendanceStatus.LATE, AttendanceStatus.HALF_DAY, AttendanceStatus.CHECKED_OUT, AttendanceStatus.ABSENT, AttendanceStatus.INCOMPLETE]>>;
     checkInTime: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     checkOutTime: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     reason: z.ZodString;
-    isLate: z.ZodOptional<z.ZodBoolean>;
-    isMissingCheckout: z.ZodOptional<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
     reason: string;
-    status?: AttendanceStatus | undefined;
+    status?: AttendanceStatus.PRESENT | AttendanceStatus.LATE | AttendanceStatus.HALF_DAY | AttendanceStatus.CHECKED_OUT | AttendanceStatus.ABSENT | AttendanceStatus.INCOMPLETE | undefined;
     checkInTime?: string | null | undefined;
     checkOutTime?: string | null | undefined;
-    isLate?: boolean | undefined;
-    isMissingCheckout?: boolean | undefined;
 }, {
     reason: string;
-    status?: AttendanceStatus | undefined;
+    status?: AttendanceStatus.PRESENT | AttendanceStatus.LATE | AttendanceStatus.HALF_DAY | AttendanceStatus.CHECKED_OUT | AttendanceStatus.ABSENT | AttendanceStatus.INCOMPLETE | undefined;
     checkInTime?: string | null | undefined;
     checkOutTime?: string | null | undefined;
-    isLate?: boolean | undefined;
-    isMissingCheckout?: boolean | undefined;
 }>, {
     reason: string;
-    status?: AttendanceStatus | undefined;
+    status?: AttendanceStatus.PRESENT | AttendanceStatus.LATE | AttendanceStatus.HALF_DAY | AttendanceStatus.CHECKED_OUT | AttendanceStatus.ABSENT | AttendanceStatus.INCOMPLETE | undefined;
     checkInTime?: string | null | undefined;
     checkOutTime?: string | null | undefined;
-    isLate?: boolean | undefined;
-    isMissingCheckout?: boolean | undefined;
 }, {
     reason: string;
-    status?: AttendanceStatus | undefined;
+    status?: AttendanceStatus.PRESENT | AttendanceStatus.LATE | AttendanceStatus.HALF_DAY | AttendanceStatus.CHECKED_OUT | AttendanceStatus.ABSENT | AttendanceStatus.INCOMPLETE | undefined;
     checkInTime?: string | null | undefined;
     checkOutTime?: string | null | undefined;
-    isLate?: boolean | undefined;
-    isMissingCheckout?: boolean | undefined;
 }>;
 export type AttendanceCorrectionRequest = z.infer<typeof AttendanceCorrectionRequestSchema>;
 export declare const AbsenceEvaluationJobRequestSchema: z.ZodObject<{

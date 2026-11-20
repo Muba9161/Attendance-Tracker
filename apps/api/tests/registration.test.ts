@@ -1,13 +1,24 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import bcrypt from "bcryptjs";
+import nodemailer from "nodemailer";
 import { app } from "../src/app";
 import { Employee, User, RegistrationOtp } from "../src/models";
 import { ApiErrorCode, UserRole, WorkType } from "@vorldx/shared";
 import { env } from "../src/config/env";
+import { setMailAdapterForTesting } from "../src/services/mail";
 
 describe("Employee Self-Registration Engine", () => {
+  let lastDeliveredOtp = "";
   beforeEach(async () => {
+    lastDeliveredOtp = "";
+    setMailAdapterForTesting({
+      name: "MockSmtpMailAdapter",
+      sendMail: async (options) => {
+        lastDeliveredOtp = options.text?.match(/\b\d{6}\b/)?.[0] || "";
+        return { success: true };
+      },
+    });
     await RegistrationOtp.deleteMany({});
     await User.deleteMany({});
     await Employee.deleteMany({});
@@ -15,7 +26,7 @@ describe("Employee Self-Registration Engine", () => {
 
   it("rejects register-start for unknown employee ID with 404 ERR_EMPLOYEE_NOT_FOUND", async () => {
     const res = await request(app)
-      .post("/api/auth/register-start")
+      .post("/api/auth/mobile/register-start")
       .send({ employeeId: "NON-EXISTENT-999" });
 
     expect(res.status).toBe(404);
@@ -37,7 +48,7 @@ describe("Employee Self-Registration Engine", () => {
     });
 
     const res = await request(app)
-      .post("/api/auth/register-start")
+      .post("/api/auth/mobile/register-start")
       .send({ employeeId: "EMP-INACTIVE" });
 
     expect(res.status).toBe(403);
@@ -68,7 +79,7 @@ describe("Employee Self-Registration Engine", () => {
     });
 
     const res = await request(app)
-      .post("/api/auth/register-start")
+      .post("/api/auth/mobile/register-start")
       .send({ employeeId: "EMP-EXISTS" });
 
     expect(res.status).toBe(409);
@@ -77,7 +88,7 @@ describe("Employee Self-Registration Engine", () => {
     expect(res.body.message).toContain("Account is already registered");
   });
 
-  it("generates 6-digit OTP, stores only hash in DB, and includes simulated OTP in demo mode", async () => {
+  it("web signup validates an assigned employee and creates exactly one linked User after demo OTP verification", async () => {
     await Employee.create({
       employeeId: "EMP-DEMO-01",
       name: "Demo Worker",
@@ -89,17 +100,36 @@ describe("Employee Self-Registration Engine", () => {
       isActive: true,
     });
 
-    const res = await request(app)
-      .post("/api/auth/register-start")
-      .send({ employeeId: "EMP-DEMO-01" });
+    const originalNodeEnv = env.NODE_ENV;
+    const originalDemoMode = env.DEMO_OTP_MODE;
+    let emailSendCount = 0;
+    setMailAdapterForTesting({
+      name: "NoDeliveryDemoAdapter",
+      sendMail: async () => {
+        emailSendCount += 1;
+        return { success: true };
+      },
+    });
+    (env as { NODE_ENV: string }).NODE_ENV = "development";
+    (env as { DEMO_OTP_MODE: boolean }).DEMO_OTP_MODE = true;
 
-    expect(res.status).toBe(200);
+    const res = await request(app).post("/api/auth/signup").send({
+      employeeId: "EMP-DEMO-01",
+      email: "ignored.input@vorldx.demo",
+      name: "Ignored Input",
+      password: "StrongPassword123!",
+    });
+
+    expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(res.body.employeeId).toBe("EMP-DEMO-01");
     expect(res.body.email).toBe("demo.worker@vorldx.demo");
+    expect(res.body.requiresOtpVerification).toBe(true);
     expect(res.body.simulatedDemoOtp).toBeDefined();
     expect(res.body.simulatedDemoOtp).toMatch(/^\d{6}$/);
     expect(res.body.demoNotice).toContain("SIMULATED OTP FOR DEMO ENVIRONMENT ONLY");
+    expect(emailSendCount).toBe(0);
+    expect(await User.countDocuments({ employeeId: "EMP-DEMO-01" })).toBe(0);
 
     const plainOtp = res.body.simulatedDemoOtp;
 
@@ -112,15 +142,101 @@ describe("Employee Self-Registration Engine", () => {
     expect(isBcryptMatch).toBe(true);
     expect(otpDoc?.attempts).toBe(0);
     expect(otpDoc?.isUsed).toBe(false);
+
+    const verifyRes = await request(app).post("/api/auth/register-verify").send({
+      employeeId: "EMP-DEMO-01",
+      otp: plainOtp,
+      password: "StrongPassword123!",
+    });
+    expect(verifyRes.status).toBe(201);
+    expect(await User.countDocuments({ employeeId: "EMP-DEMO-01" })).toBe(1);
+    const linkedEmployee = await Employee.findOne({ employeeId: "EMP-DEMO-01" });
+    expect(linkedEmployee?.userId?.toString()).toBe(verifyRes.body.user._id);
+
+    const duplicateStart = await request(app)
+      .post("/api/auth/signup")
+      .send({ employeeId: "EMP-DEMO-01", email: "x@vorldx.demo", name: "Duplicate User", password: "StrongPassword123!" });
+    expect(duplicateStart.status).toBe(409);
+    expect(await User.countDocuments({ employeeId: "EMP-DEMO-01" })).toBe(1);
+
+    (env as { NODE_ENV: string }).NODE_ENV = originalNodeEnv;
+    (env as { DEMO_OTP_MODE: boolean }).DEMO_OTP_MODE = originalDemoMode;
+    setMailAdapterForTesting(null);
+  });
+
+  it("rejects an unknown Employee ID from the web signup endpoint without creating records", async () => {
+    const res = await request(app).post("/api/auth/signup").send({
+      employeeId: "UNKNOWN-EMP-01",
+      email: "unused@vorldx.demo",
+      name: "Unused Sample",
+      password: "StrongPassword123!",
+    });
+
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe(ApiErrorCode.ERR_EMPLOYEE_NOT_FOUND);
+    expect(await User.countDocuments({})).toBe(0);
+    expect(await Employee.countDocuments({})).toBe(0);
+  });
+
+  it("sends OTP through the existing mail adapter in live mode and never returns it", async () => {
+    const originalNodeEnv = env.NODE_ENV;
+    const originalDemoMode = env.DEMO_OTP_MODE;
+    let delivery: { to?: string; text?: string } | undefined;
+    setMailAdapterForTesting({
+      name: "LiveDeliveryTestAdapter",
+      sendMail: async (options) => {
+        delivery = options;
+        return { success: true };
+      },
+    });
+    (env as { NODE_ENV: string }).NODE_ENV = "development";
+    (env as { DEMO_OTP_MODE: boolean }).DEMO_OTP_MODE = false;
+
+    await Employee.create({
+      employeeId: "EMP-LIVE-01",
+      name: "Live Demo Worker",
+      email: "live.demo@vorldx.demo",
+      department: "Demonstration",
+      designation: "Sample Employee",
+      workType: WorkType.FULL_TIME,
+      joiningDate: "2026-01-01",
+      isActive: true,
+    });
+    const res = await request(app).post("/api/auth/signup").send({
+      employeeId: "EMP-LIVE-01",
+      email: "untrusted@vorldx.demo",
+      name: "Untrusted Input",
+      password: "StrongPassword123!",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.simulatedDemoOtp).toBeUndefined();
+    expect(res.body.demoNotice).toBeUndefined();
+    expect(delivery?.to).toBe("live.demo@vorldx.demo");
+    expect(delivery?.text).toMatch(/\d{6}/);
+    expect(res.body.email).toBe("live.demo@vorldx.demo");
+
+    (env as { NODE_ENV: string }).NODE_ENV = originalNodeEnv;
+    (env as { DEMO_OTP_MODE: boolean }).DEMO_OTP_MODE = originalDemoMode;
+    setMailAdapterForTesting(null);
   });
 
   it("never returns simulated OTP when in production mode", async () => {
-    const originalEnv = process.env.NODE_ENV;
+    const originalConfiguredNodeEnv = env.NODE_ENV;
     const originalDemoMode = env.DEMO_OTP_MODE;
+    let emailSendCount = 0;
+    setMailAdapterForTesting({
+      name: "ProductionDeliveryTestAdapter",
+      sendMail: async () => {
+        emailSendCount += 1;
+        return { success: true };
+      },
+    });
 
     try {
       // Force production mode
       (env as { NODE_ENV: string }).NODE_ENV = "production";
+      (env as { DEMO_OTP_MODE: boolean }).DEMO_OTP_MODE = true;
 
       await Employee.create({
         employeeId: "EMP-PROD-01",
@@ -134,7 +250,7 @@ describe("Employee Self-Registration Engine", () => {
       });
 
       const res = await request(app)
-        .post("/api/auth/register-start")
+        .post("/api/auth/mobile/register-start")
         .send({ employeeId: "EMP-PROD-01" });
 
       expect(res.status).toBe(200);
@@ -142,9 +258,11 @@ describe("Employee Self-Registration Engine", () => {
       expect(res.body.simulatedDemoOtp).toBeUndefined();
       expect(res.body.demoNotice).toBeUndefined();
       expect(res.body.message).toContain("sent to registered employee email");
+      expect(emailSendCount).toBe(1);
     } finally {
-      (env as { NODE_ENV: string }).NODE_ENV = originalEnv;
+      (env as { NODE_ENV: string }).NODE_ENV = originalConfiguredNodeEnv;
       (env as { DEMO_OTP_MODE: boolean }).DEMO_OTP_MODE = originalDemoMode;
+      setMailAdapterForTesting(null);
     }
   });
 
@@ -161,7 +279,7 @@ describe("Employee Self-Registration Engine", () => {
     });
 
     // 1. Start registration
-    await request(app).post("/api/auth/register-start").send({ employeeId: "EMP-WRONG-OTP" });
+    await request(app).post("/api/auth/mobile/register-start").send({ employeeId: "EMP-WRONG-OTP" });
 
     // 2. Submit wrong OTP
     const res = await request(app).post("/api/auth/register-verify").send({
@@ -179,6 +297,104 @@ describe("Employee Self-Registration Engine", () => {
     expect(otpDoc?.attempts).toBe(1);
   });
 
+  it("uses registered email, stores only a hash, hides OTP, and enforces resend cooldown", async () => {
+    await Employee.create({
+      employeeId: "EMP-SMTP-OTP",
+      name: "SMTP Employee",
+      email: "registered.person@example.com",
+      department: "Operations",
+      designation: "Associate",
+      workType: WorkType.FULL_TIME,
+      joiningDate: "2024-03-01",
+      isActive: true,
+    });
+    const start = await request(app).post("/api/auth/mobile/register-start").send({ employeeId: "EMP-SMTP-OTP" });
+    expect(start.status).toBe(200);
+    expect(start.body.data.maskedEmail).toContain("@example.com");
+    expect(JSON.stringify(start.body)).not.toContain(lastDeliveredOtp);
+    expect(start.body.data.simulatedOtp).toBeUndefined();
+    expect(lastDeliveredOtp).toMatch(/^\d{6}$/);
+
+    const record = await RegistrationOtp.findOne({ employeeId: "EMP-SMTP-OTP" });
+    expect(record?.email).toBe("registered.person@example.com");
+    expect(record?.hashedCode).not.toBe(lastDeliveredOtp);
+    expect(await bcrypt.compare(lastDeliveredOtp, record!.hashedCode)).toBe(true);
+    expect(record!.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(env.OTP_EXPIRY_MINUTES * 60_000);
+    expect(record!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    const blocked = await request(app).post("/api/auth/mobile/register-resend").send({ employeeId: "EMP-SMTP-OTP" });
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.message).toContain("wait");
+
+    await RegistrationOtp.updateOne({ _id: record!._id }, { $set: { createdAt: new Date(Date.now() - 61_000) } });
+    const oldOtp = lastDeliveredOtp;
+    const resend = await request(app).post("/api/auth/mobile/register-resend").send({ employeeId: "EMP-SMTP-OTP" });
+    expect(resend.status).toBe(200);
+    expect(lastDeliveredOtp).not.toBe(oldOtp);
+    const replaced = await RegistrationOtp.findOne({ employeeId: "EMP-SMTP-OTP" });
+    expect(await bcrypt.compare(oldOtp, replaced!.hashedCode)).toBe(false);
+    expect(await bcrypt.compare(lastDeliveredOtp, replaced!.hashedCode)).toBe(true);
+  });
+
+  it("selects Nodemailer SMTP for mobile activation with a mocked sendMail", async () => {
+    await Employee.create({
+      employeeId: "EMP-MOCKED-SMTP",
+      name: "SMTP Employee",
+      email: "smtp.employee@example.com",
+      department: "Operations",
+      designation: "Associate",
+      workType: WorkType.FULL_TIME,
+      joiningDate: "2024-03-01",
+      isActive: true,
+    });
+    vi.stubEnv("SMTP_HOST", "smtp.gmail.com");
+    vi.stubEnv("SMTP_PORT", "587");
+    vi.stubEnv("SMTP_SECURE", "false");
+    vi.stubEnv("SMTP_USER", "test@example.com");
+    vi.stubEnv("SMTP_PASS", "test-app-password");
+    vi.stubEnv("SMTP_FROM_EMAIL", "test@example.com");
+    vi.stubEnv("SMTP_FROM_NAME", "VORLDX INDUSTRIES PRIVATE LIMITED");
+    setMailAdapterForTesting(null);
+    const fakeTransport = {
+      sendMail: vi.fn(async (options: { text?: string }) => {
+        lastDeliveredOtp = options.text?.match(/\b\d{6}\b/)?.[0] || "";
+        return { messageId: "mocked" };
+      }),
+      verify: vi.fn(async () => true),
+    };
+    const createTransport = vi.spyOn(nodemailer, "createTransport").mockReturnValue(fakeTransport as never);
+    try {
+      const response = await request(app).post("/api/auth/mobile/register-start").send({ employeeId: "EMP-MOCKED-SMTP" });
+      expect(response.status).toBe(200);
+      expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({
+        host: "smtp.gmail.com", port: 587, secure: false, requireTLS: true,
+      }));
+      expect(fakeTransport.sendMail).toHaveBeenCalledOnce();
+      expect(JSON.stringify(response.body)).not.toContain(lastDeliveredOtp);
+    } finally {
+      createTransport.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("removes the pending mobile OTP and returns a safe error when SMTP delivery fails", async () => {
+    await Employee.create({
+      employeeId: "EMP-SMTP-FAIL",
+      name: "SMTP Failure",
+      email: "smtp.failure@example.com",
+      department: "Operations",
+      designation: "Associate",
+      workType: WorkType.FULL_TIME,
+      joiningDate: "2024-03-01",
+      isActive: true,
+    });
+    setMailAdapterForTesting({ name: "FailingMockSmtp", sendMail: async () => { throw new Error("provider error containing 123456"); } });
+    const response = await request(app).post("/api/auth/mobile/register-start").send({ employeeId: "EMP-SMTP-FAIL" });
+    expect(response.status).toBe(503);
+    expect(response.body.message).not.toContain("123456");
+    expect(await RegistrationOtp.countDocuments({ employeeId: "EMP-SMTP-FAIL" })).toBe(0);
+  });
+
   it("enforces attempt limit and invalidates OTP after maximum failures", async () => {
     await Employee.create({
       employeeId: "EMP-MAX-ATTEMPTS",
@@ -192,7 +408,7 @@ describe("Employee Self-Registration Engine", () => {
     });
 
     // Start registration
-    await request(app).post("/api/auth/register-start").send({ employeeId: "EMP-MAX-ATTEMPTS" });
+    await request(app).post("/api/auth/mobile/register-start").send({ employeeId: "EMP-MAX-ATTEMPTS" });
 
     // Fail 1st attempt
     const res1 = await request(app).post("/api/auth/register-verify").send({
@@ -240,10 +456,10 @@ describe("Employee Self-Registration Engine", () => {
     });
 
     const startRes = await request(app)
-      .post("/api/auth/register-start")
+      .post("/api/auth/mobile/register-start")
       .send({ employeeId: "EMP-EXPIRED-OTP" });
 
-    const plainOtp = startRes.body.simulatedDemoOtp;
+    const plainOtp = lastDeliveredOtp;
 
     // Simulate OTP expiration in database
     await RegistrationOtp.updateOne(
@@ -277,12 +493,13 @@ describe("Employee Self-Registration Engine", () => {
 
     // 1. Request registration OTP
     const startRes = await request(app)
-      .post("/api/auth/register-start")
+      .post("/api/auth/mobile/register-start")
       .send({ employeeId: "EMP-SUCCESS-99" });
 
     expect(startRes.status).toBe(200);
-    const simulatedOtp = startRes.body.simulatedDemoOtp;
-    expect(simulatedOtp).toBeDefined();
+    const simulatedOtp = lastDeliveredOtp;
+    expect(simulatedOtp).toMatch(/^\d{6}$/);
+    expect(startRes.body.simulatedDemoOtp).toBeUndefined();
 
     // 2. Verify OTP and set password
     const newPassword = "MyStrongSecurePassword123!";
@@ -351,12 +568,13 @@ describe("Employee Self-Registration Engine", () => {
 
     // Step 1: Start registration
     const startRes = await request(app)
-      .post("/api/auth/register-start")
+      .post("/api/auth/mobile/register-start")
       .send({ employeeId: "EMP-MOBILE-01" });
 
     expect(startRes.status).toBe(200);
-    const otp = startRes.body.simulatedDemoOtp;
-    expect(otp).toBeDefined();
+    const otp = lastDeliveredOtp;
+    expect(otp).toMatch(/^\d{6}$/);
+    expect(startRes.body.simulatedDemoOtp).toBeUndefined();
 
     // Step 2: Verify OTP without password (mobile UI Step 2)
     const verifyOtpRes = await request(app)

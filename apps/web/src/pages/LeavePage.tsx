@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   useLeaveRequests,
@@ -30,6 +30,8 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import { useSocket } from "../context/SocketContext";
+import { decisionToastEventKey } from "../utils/recentEventDedupe";
+import { tryAcquireActionLock } from "../utils/actionLock";
 import {
   CalendarCheck,
   Check,
@@ -110,6 +112,8 @@ export const LeavePage: React.FC = () => {
     data: requestsResponse,
     isLoading: isRequestsLoading,
     isError: isRequestsError,
+    error: requestsError,
+    isFetching: isRequestsFetching,
     refetch: refetchRequests,
   } = useLeaveRequests(filters);
 
@@ -117,7 +121,7 @@ export const LeavePage: React.FC = () => {
   const pagination = requestsResponse?.pagination || { total: 0, page: 1, limit: 15, totalPages: 1 };
 
   // Leave Types for filter dropdowns & settings
-  const { data: typesResponse, isLoading: isTypesLoading } = useLeaveTypes(true);
+  const { data: typesResponse, isLoading: isTypesLoading, isError: isTypesError, error: typesError, refetch: refetchTypes } = useLeaveTypes(true);
   const leaveTypes = typesResponse?.data || [];
 
   // Mutations
@@ -134,8 +138,9 @@ export const LeavePage: React.FC = () => {
 
   // Row-Click Slide-Over Drawer State
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequestPopulated | null>(null);
-  const [drawerDecisionNote, setDrawerDecisionNote] = useState("");
+  const drawerDecisionNoteRef = useRef<HTMLTextAreaElement>(null);
   const [confirmSingleAction, setConfirmSingleAction] = useState<"APPROVED" | "REJECTED" | null>(null);
+  const singleDecisionSubmittingRef = useRef(false);
 
   // Helper to resolve employee ID from request
   const selectedEmpId = useMemo(() => {
@@ -146,7 +151,12 @@ export const LeavePage: React.FC = () => {
   }, [selectedRequest]);
 
   // Query selected employee's live leave balances for the drawer
-  const { data: empBalancesResponse } = useEmployeeLeaveBalances(
+  const {
+    data: empBalancesResponse,
+    isLoading: isEmployeeBalancesLoading,
+    isError: isEmployeeBalancesError,
+    error: employeeBalancesError,
+  } = useEmployeeLeaveBalances(
     selectedEmpId,
     selectedRequest?.startDate ? parseInt(selectedRequest.startDate.substring(0, 4), 10) : undefined
   );
@@ -246,12 +256,12 @@ export const LeavePage: React.FC = () => {
   };
 
   const handleExecuteSingleDecision = async (status: "APPROVED" | "REJECTED") => {
-    if (!selectedRequest) return;
+    if (!selectedRequest || !tryAcquireActionLock(singleDecisionSubmittingRef)) return;
     try {
       await decideMutation.mutateAsync({
         id: selectedRequest._id,
         status,
-        decisionNote: drawerDecisionNote || undefined,
+        decisionNote: drawerDecisionNoteRef.current?.value || undefined,
       });
 
       toast({
@@ -262,17 +272,19 @@ export const LeavePage: React.FC = () => {
             ? selectedRequest.employee.name
             : selectedRequest.employee
         } has been marked ${status.toLowerCase()}.`,
+        dedupeKey: decisionToastEventKey("leave", selectedRequest._id, status),
       });
 
       setConfirmSingleAction(null);
       setSelectedRequest(null);
-      setDrawerDecisionNote("");
     } catch (err: any) {
       toast({
         type: "error",
         title: "Decision Failed",
         description: err.message || "Failed to process leave decision.",
       });
+    } finally {
+      singleDecisionSubmittingRef.current = false;
     }
   };
 
@@ -288,6 +300,8 @@ export const LeavePage: React.FC = () => {
     data: allBalancesResponse,
     isLoading: isBalancesLoading,
     isError: isBalancesError,
+    error: balancesError,
+    isFetching: isBalancesFetching,
     refetch: refetchBalances,
   } = useAllLeaveBalances({
     year: balanceYear,
@@ -414,7 +428,7 @@ export const LeavePage: React.FC = () => {
     name: "",
     code: "",
     paid: true,
-    annualQuota: 12,
+    annualQuota: "",
     carryAllowed: false,
     maxCarryDays: 5,
     expiryMonths: 6,
@@ -432,7 +446,7 @@ export const LeavePage: React.FC = () => {
       name: "",
       code: "",
       paid: true,
-      annualQuota: 12,
+      annualQuota: "",
       carryAllowed: false,
       maxCarryDays: 5,
       expiryMonths: 6,
@@ -448,7 +462,7 @@ export const LeavePage: React.FC = () => {
       name: lt.name,
       code: lt.code,
       paid: lt.paid,
-      annualQuota: lt.annualQuota,
+      annualQuota: String(lt.annualQuota),
       carryAllowed: lt.carryForwardRule?.allowed ?? false,
       maxCarryDays: lt.carryForwardRule?.maxDays ?? 0,
       expiryMonths: lt.carryForwardRule?.expiryMonths ?? 6,
@@ -460,6 +474,11 @@ export const LeavePage: React.FC = () => {
 
   const handleSaveType = async (e: React.FormEvent) => {
     e.preventDefault();
+    const annualQuota = typeForm.annualQuota === "" ? Number.NaN : Number(typeForm.annualQuota);
+    if (!Number.isFinite(annualQuota) || annualQuota < 0) {
+      toast({ type: "error", title: "Annual quota required", description: "Enter an annual quota before saving this leave type." });
+      return;
+    }
     try {
       if (editingType) {
         await updateTypeMutation.mutateAsync({
@@ -468,7 +487,7 @@ export const LeavePage: React.FC = () => {
             name: typeForm.name,
             code: typeForm.code,
             paid: typeForm.paid,
-            annualQuota: typeForm.annualQuota,
+            annualQuota,
             carryForwardRule: {
               allowed: typeForm.carryAllowed,
               maxDays: typeForm.maxCarryDays,
@@ -484,7 +503,7 @@ export const LeavePage: React.FC = () => {
           name: typeForm.name,
           code: typeForm.code,
           paid: typeForm.paid,
-          annualQuota: typeForm.annualQuota,
+          annualQuota,
           carryForwardRule: {
             allowed: typeForm.carryAllowed,
             maxDays: typeForm.maxCarryDays,
@@ -666,12 +685,12 @@ export const LeavePage: React.FC = () => {
       {activeTab === "requests" && (
         <div className="space-y-4">
           {/* Status Tab Filter Bar */}
-          <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto gap-1">
+          <div className="leave-status-filters flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto gap-1">
             {STATUS_TABS.map((tab) => (
               <button
                 key={tab.value}
                 onClick={() => setFilters((prev) => ({ ...prev, status: tab.value, page: 1 }))}
-                className={`px-4 py-2 text-xs font-semibold whitespace-nowrap border-b-2 transition-all ${
+                className={`leave-status-filter px-4 py-2 text-xs font-semibold whitespace-nowrap border-b-2 transition-all ${
                   filters.status === tab.value
                     ? "border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/20 rounded-t-lg"
                     : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
@@ -712,7 +731,7 @@ export const LeavePage: React.FC = () => {
               aria-label="Filter by leave type"
             />
 
-            <div className="flex gap-2">
+            <div className="leave-date-range flex gap-2">
               <input
                 type="date"
                 value={filters.startDate}
@@ -781,11 +800,12 @@ export const LeavePage: React.FC = () => {
                 <Skeleton key={i} className="h-16 w-full rounded-xl" />
               ))}
             </div>
-          ) : isRequestsError ? (
+          ) : isRequestsError && !requestsResponse ? (
             <ErrorState
               title="Unable to load leave requests"
-              message="The request queue could not be loaded from the backend service."
-              onRetry={() => refetchRequests()}
+              message={requestsError instanceof Error ? requestsError.message : "The request queue could not be loaded."}
+              onRetry={() => void refetchRequests()}
+              isRetrying={isRequestsFetching}
             />
           ) : requests.length === 0 ? (
             <EmptyState
@@ -794,9 +814,13 @@ export const LeavePage: React.FC = () => {
               icon={CalendarCheck}
             />
           ) : (
+            <>
+            {isRequestsError && <ErrorState title="Leave request refresh failed"
+              message={requestsError instanceof Error ? requestsError.message : "Showing the last successfully loaded requests."}
+              onRetry={() => void refetchRequests()} isRetrying={isRequestsFetching} className="mb-3 p-3" />}
             <div className="overflow-hidden bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+              <div className="leave-requests-table-scroll overflow-x-auto">
+                <table className="leave-requests-table w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold uppercase tracking-wider text-[11px] select-none z-10">
                     <tr>
                       <th className="py-3 px-4 w-10">
@@ -856,7 +880,11 @@ export const LeavePage: React.FC = () => {
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            <Badge variant={lt?.paid ? "info" : "neutral"} size="sm">
+                            <Badge
+                              variant={lt?.paid ? "info" : "neutral"}
+                              size="sm"
+                              className="rounded-none border-0 bg-transparent px-0 py-0"
+                            >
                               {lt?.name || "Leave"} ({lt?.code || "LV"})
                             </Badge>
                           </td>
@@ -936,7 +964,7 @@ export const LeavePage: React.FC = () => {
 
               {/* Pagination Bar */}
               {pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between p-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+                <div className="leave-requests-pagination flex items-center justify-between p-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500">
                   <span>
                     Showing Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
                   </span>
@@ -959,6 +987,7 @@ export const LeavePage: React.FC = () => {
                 </div>
               )}
             </div>
+            </>
           )}
         </div>
       )}
@@ -1024,13 +1053,18 @@ export const LeavePage: React.FC = () => {
           </div>
 
           {/* Balances Table */}
+      {isBalancesError && allBalancesResponse && (
+        <ErrorState title="Balance refresh failed"
+          message={balancesError instanceof Error ? balancesError.message : "Showing the last successfully loaded balances."}
+          onRetry={() => void refetchBalances()} isRetrying={isBalancesFetching} className="p-4" />
+      )}
           {isBalancesLoading ? (
             <div className="space-y-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="h-20 w-full rounded-xl" />
               ))}
             </div>
-          ) : isBalancesError ? (
+          ) : isBalancesError && !allBalancesResponse ? (
             <ErrorState
               title="Unable to load employee balances"
               message="The balance directory could not be reached."
@@ -1038,8 +1072,8 @@ export const LeavePage: React.FC = () => {
             />
           ) : balanceGroups.length === 0 ? (
             <EmptyState
-              title="No balances found"
-              description="No employee records matched the selected year and department."
+              title="No allocated balances found"
+              description="No allocated leave balances matched the selected year and department."
               icon={Layers}
             />
           ) : (
@@ -1165,16 +1199,30 @@ export const LeavePage: React.FC = () => {
             </Button>
           </div>
 
+          {isTypesError && typesResponse && (
+            <ErrorState
+              title="Leave types refresh failed"
+              message={typesError instanceof Error ? typesError.message : "Showing the last successfully loaded leave types."}
+              onRetry={() => void refetchTypes()}
+              className="p-4"
+            />
+          )}
           {isTypesLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-44 w-full rounded-xl" />
               ))}
             </div>
+          ) : isTypesError && !typesResponse ? (
+            <ErrorState
+              title="Unable to load leave types"
+              message={typesError instanceof Error ? typesError.message : "Leave type settings could not be reached."}
+              onRetry={() => void refetchTypes()}
+            />
           ) : leaveTypes.length === 0 ? (
             <EmptyState
               title="No Leave Types Configured"
-              description="Define your first leave category to allow employees to submit requests."
+              description="No leave types created yet. Ask Admin to create a leave type."
               icon={Settings2}
               action={
                 <Button size="sm" onClick={handleOpenCreateType}>
@@ -1259,7 +1307,7 @@ export const LeavePage: React.FC = () => {
       {/* TAB 4: TEAM LEAVE CALENDAR OVERLAY */}
       {/* ========================================================================= */}
       {activeTab === "calendar" && (
-        <div className="space-y-4">
+        <div className="leave-team-calendar space-y-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
             <div className="flex items-center gap-3">
               <button
@@ -1301,9 +1349,9 @@ export const LeavePage: React.FC = () => {
           </div>
 
           {/* Calendar Grid */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="leave-team-calendar__grid bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
             {/* Weekday Headers */}
-            <div className="grid grid-cols-7 border-b border-slate-200 dark:border-slate-800 text-center text-xs font-bold text-slate-600 dark:text-slate-400 py-2.5 bg-slate-50 dark:bg-slate-800/40">
+            <div className="leave-team-calendar__weekdays grid grid-cols-7 border-b border-slate-200 dark:border-slate-800 text-center text-xs font-bold text-slate-600 dark:text-slate-400 py-2.5 bg-slate-50 dark:bg-slate-800/40">
               <span>Sun</span>
               <span>Mon</span>
               <span>Tue</span>
@@ -1314,27 +1362,27 @@ export const LeavePage: React.FC = () => {
             </div>
 
             {/* Days Grid */}
-            <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="leave-team-calendar__days grid grid-cols-7 divide-x divide-y divide-slate-100 dark:divide-slate-800">
               {calendarDays.map((day, idx) => (
                 <div
                   key={idx}
-                  className={`min-h-24 p-1.5 flex flex-col justify-between transition-colors ${
+                  className={`leave-team-calendar__day min-h-24 p-1.5 flex flex-col justify-between transition-colors ${
                     !day.isCurrentMonth
                       ? "bg-slate-50/50 dark:bg-slate-950/20 text-slate-300 dark:text-slate-700"
                       : "hover:bg-slate-50/60 dark:hover:bg-slate-800/30 text-slate-800 dark:text-slate-200"
                   }`}
                 >
-                  <div className="flex justify-between items-center mb-1">
+                  <div className="leave-team-calendar__day-heading flex justify-between items-center mb-1">
                     <span className="text-xs font-semibold">{day.dayNumber}</span>
                     {day.leaves.length > 0 && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
+                      <span className="leave-team-calendar__count text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
                         {day.leaves.length} off
                       </span>
                     )}
                   </div>
 
                   {/* Day Leave Badges */}
-                  <div className="space-y-1 overflow-y-auto max-h-16">
+                  <div className="leave-team-calendar__events space-y-1 overflow-y-auto max-h-16">
                     {day.leaves.slice(0, 3).map((l) => {
                       const empName = typeof l.employee === "object" ? l.employee.name : "Employee";
                       const ltCode = typeof l.type === "object" ? l.type.code : "LV";
@@ -1342,7 +1390,7 @@ export const LeavePage: React.FC = () => {
                         <div
                           key={l._id}
                           onClick={() => setSelectedRequest(l)}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-200 border border-indigo-200/50 dark:border-indigo-800/50 truncate cursor-pointer hover:bg-indigo-100 transition-colors"
+                          className="leave-team-calendar__event px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-200 border border-indigo-200/50 dark:border-indigo-800/50 truncate cursor-pointer hover:bg-indigo-100 transition-colors"
                           title={`${empName} on ${ltCode}: ${l.reason}`}
                         >
                           {empName.split(" ")[0]} ({ltCode})
@@ -1369,7 +1417,6 @@ export const LeavePage: React.FC = () => {
         isOpen={Boolean(selectedRequest)}
         onClose={() => {
           setSelectedRequest(null);
-          setDrawerDecisionNote("");
         }}
         title="Leave Application Details"
         description="Inspect employee quotas, team overlap, and decide on application."
@@ -1380,7 +1427,7 @@ export const LeavePage: React.FC = () => {
             {/* Employee Profile Header */}
             {typeof selectedRequest.employee === "object" && selectedRequest.employee && (
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 text-white flex items-center justify-center text-lg font-bold shadow-xs">
                   {selectedRequest.employee.name?.charAt(0) || "E"}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1441,33 +1488,47 @@ export const LeavePage: React.FC = () => {
                 </h4>
               </div>
 
-              {empBalances.length === 0 ? (
+              {isEmployeeBalancesLoading ? (
                 <Skeleton className="h-14 w-full" />
+              ) : isEmployeeBalancesError && !empBalancesResponse ? (
+                <ErrorState
+                  title="Unable to load employee balance"
+                  message={employeeBalancesError instanceof Error ? employeeBalancesError.message : "Balance details could not be reached."}
+                  className="p-3"
+                />
               ) : (
+                <>
+                {isEmployeeBalancesError && (
+                  <ErrorState
+                    title="Unable to load employee balance"
+                    message={employeeBalancesError instanceof Error ? employeeBalancesError.message : "Balance details could not be reached."}
+                    className="p-3"
+                  />
+                )}
                 <div className="grid grid-cols-4 gap-2 text-center text-xs pt-1">
                   {(() => {
                     const reqTypeId =
                       typeof selectedRequest.type === "object" ? selectedRequest.type._id : selectedRequest.type;
-                    const matched = empBalances.find((b) => b.type.id === reqTypeId) || empBalances[0];
+                    const matched = empBalances.find((b) => b.type.id === reqTypeId);
 
                     return (
                       <>
                         <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800">
                           <span className="text-[10px] text-slate-400 block">Total Quota</span>
                           <span className="font-bold text-slate-800 dark:text-slate-200">
-                            {matched ? matched.allotted + matched.carriedOver : "-"}
+                            {matched ? matched.allotted + matched.carriedOver : "Not allocated"}
                           </span>
                         </div>
                         <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800">
                           <span className="text-[10px] text-slate-400 block">Used</span>
                           <span className="font-bold text-rose-600 dark:text-rose-400">
-                            {matched ? matched.used : "-"}
+                            {matched ? matched.used : "Not allocated"}
                           </span>
                         </div>
                         <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800">
                           <span className="text-[10px] text-slate-400 block">Pending</span>
                           <span className="font-bold text-amber-600 dark:text-amber-400">
-                            {matched ? matched.pending : "-"}
+                            {matched ? matched.pending : "Not allocated"}
                           </span>
                         </div>
                         <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800">
@@ -1475,13 +1536,14 @@ export const LeavePage: React.FC = () => {
                             Available
                           </span>
                           <span className="font-bold text-emerald-800 dark:text-emerald-300">
-                            {matched ? matched.available : "-"}
+                            {matched ? matched.available : "Not allocated"}
                           </span>
                         </div>
                       </>
                     );
                   })()}
                 </div>
+                </>
               )}
             </div>
 
@@ -1542,9 +1604,9 @@ export const LeavePage: React.FC = () => {
                     Decision Remarks / Note (Optional):
                   </label>
                   <textarea
+                    ref={drawerDecisionNoteRef}
                     rows={2}
-                    value={drawerDecisionNote}
-                    onChange={(e) => setDrawerDecisionNote(e.target.value)}
+                    autoFocus
                     placeholder="Provide notes or approval reason..."
                     className="w-full p-2.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1880,7 +1942,7 @@ export const LeavePage: React.FC = () => {
                 min={0}
                 required
                 value={typeForm.annualQuota}
-                onChange={(e) => setTypeForm({ ...typeForm, annualQuota: Number(e.target.value) })}
+                onChange={(e) => setTypeForm({ ...typeForm, annualQuota: e.target.value })}
               />
             </div>
             <div>

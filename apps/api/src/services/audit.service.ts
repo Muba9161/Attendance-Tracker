@@ -22,12 +22,15 @@ export async function listAuditLogs(query: AuditLogFilterQuery): Promise<AuditLo
   const skip = (page - 1) * limit;
 
   const filter: Record<string, unknown> = {};
+  const andFilters: Record<string, unknown>[] = [];
 
   // Actor / Performed By
   const actor = query.actor || query.performedBy || query.performedByEmployeeId;
   if (actor) {
     if (Types.ObjectId.isValid(actor)) {
-      filter.$or = [{ performedBy: new Types.ObjectId(actor) }, { performedByEmployeeId: actor }];
+      andFilters.push({
+        $or: [{ performedBy: new Types.ObjectId(actor) }, { performedByEmployeeId: actor }],
+      });
     } else {
       filter.performedByEmployeeId = actor.trim().toUpperCase();
     }
@@ -69,12 +72,15 @@ export async function listAuditLogs(query: AuditLogFilterQuery): Promise<AuditLo
   // Free-text search in reason or entityId
   if (query.search && query.search.trim().length > 0) {
     const searchRegex = new RegExp(query.search.trim(), "i");
-    filter.$or = [
-      { reason: searchRegex },
-      { entityId: searchRegex },
-      { performedByEmployeeId: searchRegex },
-    ];
+    andFilters.push({
+      $or: [
+        { reason: searchRegex },
+        { entityId: searchRegex },
+        { performedByEmployeeId: searchRegex },
+      ],
+    });
   }
+  if (andFilters.length) filter.$and = andFilters;
 
   const [events, total] = await Promise.all([
     AuditEvent.find(filter)

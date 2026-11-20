@@ -14,9 +14,10 @@ import {
   QrChallenge,
   AuditEvent,
 } from "../src/models";
-import { ApiErrorCode, AttendanceStatus, UserRole, WorkType } from "@vorldx/shared";
+import { ApiErrorCode, AttendanceStatus, UserRole, WorkType, getDateKey } from "@vorldx/shared";
 import { env } from "../src/config/env";
 import * as qrService from "../src/services/qr.service";
+import crypto from "crypto";
 
 describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () => {
   let employeeUser: IUser;
@@ -35,7 +36,7 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
     await AuditEvent.deleteMany({});
 
     // 1. Create Default Attendance Policy with Daytime and Overnight shifts
-    await AttendancePolicy.create({
+    const policyDoc = await AttendancePolicy.create({
       name: "Standard Corporate Policy",
       version: 1,
       timezone: "Asia/Kolkata",
@@ -81,6 +82,7 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
       department: "Engineering",
       designation: "Software Engineer",
       workType: WorkType.FULL_TIME,
+      shiftId: policyDoc.shifts[0]._id,
       joiningDate: "2026-01-15",
       isActive: true,
     });
@@ -174,6 +176,27 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
   });
 
   describe("Check-Out Transitions & State Machine Prohibitions", () => {
+    it.each([
+      { label: "half-day", checkoutTime: "2026-10-20T07:30:00.000Z", durationMinutes: 240, status: AttendanceStatus.HALF_DAY },
+      { label: "full-day", checkoutTime: "2026-10-20T11:30:00.000Z", durationMinutes: 480, status: AttendanceStatus.CHECKED_OUT },
+    ])("applies the exact $label duration threshold", async ({ checkoutTime, durationMinutes, status }) => {
+      const checkInQr = await qrService.requestRotatingChallenge(pairedDisplay.displayId, pairedDisplay.credential);
+      const checkIn = await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: checkInQr.token, simulatedNow: "2026-10-20T03:30:00.000Z" });
+      expect(checkIn.status).toBe(200);
+
+      const checkoutQr = await qrService.requestRotatingChallenge(pairedDisplay.displayId, pairedDisplay.credential);
+      const checkout = await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: checkoutQr.token, simulatedNow: checkoutTime, earlyCheckoutReason: "Threshold boundary test" });
+
+      expect(checkout.status).toBe(200);
+      expect(checkout.body.durationMinutes).toBe(durationMinutes);
+      expect(checkout.body.status).toBe(status);
+      const stored = await AttendanceRecord.findById(checkIn.body.record._id);
+      expect(stored?.durationMinutes).toBe(durationMinutes);
+      expect(stored?.status).toBe(status);
+    });
+
     it("successfully checks out with calculated work duration when checked in", async () => {
       // 1. Check in at 09:00 AM IST (03:30 AM UTC)
       const token1 = await qrService.requestRotatingChallenge(
@@ -221,6 +244,44 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
       expect(dbRecord?.durationMinutes).toBe(540);
     });
 
+    it("requires and persists a non-empty reason for an early checkout without consuming the QR first", async () => {
+      const inQr = await qrService.requestRotatingChallenge(pairedDisplay.displayId, pairedDisplay.credential);
+      await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: inQr.token, simulatedNow: "2026-10-20T03:30:00.000Z" });
+      const outQr = await qrService.requestRotatingChallenge(pairedDisplay.displayId, pairedDisplay.credential);
+      const earlyTime = "2026-10-20T11:30:00.000Z"; // 5:00 PM IST, before the 6:00 PM shift end
+      const prompt = await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: outQr.token, simulatedNow: earlyTime });
+      expect(prompt.status).toBe(428);
+      expect(prompt.body.code).toBe(ApiErrorCode.ERR_EARLY_CHECKOUT_REASON_REQUIRED);
+      expect(await QrChallenge.exists({ employee: employeeDoc._id, qrNonce: outQr.token })).toBeFalsy();
+      expect(await AttendanceRecord.findOne({ employee: employeeDoc._id, dateKey: "2026-10-20", checkOutTime: null })).toBeTruthy();
+
+      const emptyReason = await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: outQr.token, simulatedNow: earlyTime, earlyCheckoutReason: "   " });
+      expect(emptyReason.status).toBe(428);
+      expect(await QrChallenge.exists({ employee: employeeDoc._id, qrNonce: outQr.token })).toBeFalsy();
+
+      const completed = await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: outQr.token, simulatedNow: earlyTime, earlyCheckoutReason: "Medical appointment" });
+      expect(completed.status).toBe(200);
+      expect(completed.body.record.isEarlyCheckout).toBe(true);
+      expect(completed.body.record.earlyCheckoutReason).toBe("Medical appointment");
+      expect(new Date(completed.body.record.checkOutTime).toISOString()).toBe(earlyTime);
+    });
+
+    it("blocks attendance safely when the employee has no assigned shift", async () => {
+      employeeDoc.shiftId = undefined;
+      await employeeDoc.save();
+      const inQr = await qrService.requestRotatingChallenge(pairedDisplay.displayId, pairedDisplay.credential);
+      const checkout = await request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: inQr.token, simulatedNow: "2026-10-20T03:30:00.000Z" });
+      expect(checkout.status).toBe(409);
+      expect(checkout.body.code).toBe(ApiErrorCode.ERR_SHIFT_NOT_ASSIGNED);
+      const record = await AttendanceRecord.findOne({ employee: employeeDoc._id, dateKey: "2026-10-20" });
+      expect(record).toBeNull();
+    });
+
     it("rejects duplicate check-in with 409 ERR_ALREADY_CHECKED_IN", async () => {
       // 1. Check in
       const token1 = await qrService.requestRotatingChallenge(
@@ -255,7 +316,7 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
       await request(app)
         .post("/attendance/scan")
         .set("Authorization", `Bearer ${employeeToken}`)
-        .send({ token: t1.token });
+        .send({ token: t1.token, simulatedNow: "2026-10-20T03:30:00.000Z" });
 
       // 2. Check out
       const t2 = await qrService.requestRotatingChallenge(
@@ -265,7 +326,7 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
       await request(app)
         .post("/attendance/scan")
         .set("Authorization", `Bearer ${employeeToken}`)
-        .send({ token: t2.token });
+        .send({ token: t2.token, simulatedNow: "2026-10-20T12:30:00.000Z" });
 
       // 3. Scan a third time after checkout
       const t3 = await qrService.requestRotatingChallenge(
@@ -275,7 +336,7 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
       const res = await request(app)
         .post("/attendance/scan")
         .set("Authorization", `Bearer ${employeeToken}`)
-        .send({ token: t3.token });
+        .send({ token: t3.token, simulatedNow: "2026-10-20T12:31:00.000Z" });
 
       expect(res.status).toBe(409);
       expect(res.body.code).toBe(ApiErrorCode.ERR_ALREADY_CHECKED_IN);
@@ -320,6 +381,158 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
   });
 
   describe("QR Security Validations & Replay Defense", () => {
+    it("consumes a successful QR once, rotates immediately, and lets another employee use the successor", async () => {
+      const challenge = await qrService.requestRotatingChallenge(
+        pairedDisplay.displayId,
+        pairedDisplay.credential
+      );
+      await QrToken.updateOne(
+        { token: challenge.token },
+        { $set: { issuedAt: new Date(Date.now() - 10_000) } }
+      );
+      const firstScan = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: challenge.token, simulatedNow: "2026-10-20T03:40:00.000Z" });
+
+      expect(firstScan.status).toBe(200);
+      expect(await AttendanceRecord.countDocuments({ employee: employeeDoc._id })).toBe(1);
+      const consumed = await QrToken.findOne({ token: challenge.token });
+      expect(consumed?.consumedAt).toBeInstanceOf(Date);
+      expect(consumed?.reservationId).toBeNull();
+
+      const successor = await QrToken.findOne({ displayId: pairedDisplay.displayId })
+        .sort({ issuedAt: -1 });
+      expect(successor?.token).toBeTruthy();
+      expect(successor?.token).not.toBe(challenge.token);
+
+      const nextEmployee = await Employee.create({
+        employeeId: "EMP-1002",
+        name: "Second Employee",
+        email: "second.employee@vorldx.demo",
+        department: "Engineering",
+        designation: "Engineer",
+        workType: WorkType.FULL_TIME,
+        shiftId: employeeDoc.shiftId,
+        joiningDate: "2026-01-15",
+        isActive: true,
+      });
+      const nextUser = await User.create({
+        employeeId: nextEmployee.employeeId,
+        email: nextEmployee.email,
+        passwordHash: "dummyHash",
+        role: UserRole.EMPLOYEE,
+        status: "ACTIVE",
+      });
+      nextEmployee.userId = nextUser._id;
+      await nextEmployee.save();
+      const nextToken = jwt.sign({
+        userId: nextUser._id.toString(),
+        employeeId: nextUser.employeeId,
+        email: nextUser.email,
+        role: nextUser.role,
+      }, env.JWT_SECRET, { expiresIn: "1h" });
+
+      const secondScan = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${nextToken}`)
+        .send({ token: successor!.token, simulatedNow: "2026-10-20T03:45:00.000Z" });
+      expect(secondScan.status).toBe(200);
+
+      const replay = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${nextToken}`)
+        .send({ token: challenge.token });
+      expect(replay.status).toBe(409);
+      expect(replay.body.code).toBe(ApiErrorCode.ERR_QR_REPLAY_DETECTED);
+    });
+
+    it("does not consume or rotate the QR when attendance is rejected", async () => {
+      const challenge = await qrService.requestRotatingChallenge(
+        pairedDisplay.displayId,
+        pairedDisplay.credential
+      );
+      const failed = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: challenge.token, action: "CHECK_OUT" });
+
+      expect(failed.status).toBe(400);
+      expect(await QrToken.countDocuments({ displayId: pairedDisplay.displayId })).toBe(1);
+      const stored = await QrToken.findOne({ token: challenge.token });
+      expect(stored?.consumedAt).toBeNull();
+      expect(stored?.reservationId).toBeNull();
+    });
+
+    it("allows only one of two employees to consume the same QR concurrently", async () => {
+      const secondEmployee = await Employee.create({
+        employeeId: "EMP-1002",
+        name: "Concurrent Employee",
+        email: "concurrent.employee@vorldx.demo",
+        department: "Engineering",
+        designation: "Engineer",
+        workType: WorkType.FULL_TIME,
+        shiftId: employeeDoc.shiftId,
+        joiningDate: "2026-01-15",
+        isActive: true,
+      });
+      const secondUser = await User.create({
+        employeeId: secondEmployee.employeeId,
+        email: secondEmployee.email,
+        passwordHash: "dummyHash",
+        role: UserRole.EMPLOYEE,
+        status: "ACTIVE",
+      });
+      secondEmployee.userId = secondUser._id;
+      await secondEmployee.save();
+      const secondToken = jwt.sign({
+        userId: secondUser._id.toString(),
+        employeeId: secondUser.employeeId,
+        email: secondUser.email,
+        role: secondUser.role,
+      }, env.JWT_SECRET, { expiresIn: "1h" });
+      const challenge = await qrService.requestRotatingChallenge(
+        pairedDisplay.displayId,
+        pairedDisplay.credential
+      );
+
+      const results = await Promise.all([
+        request(app).post("/attendance/scan").set("Authorization", `Bearer ${employeeToken}`)
+          .send({ token: challenge.token, simulatedNow: "2026-10-20T03:40:00.000Z" }),
+        request(app).post("/attendance/scan").set("Authorization", `Bearer ${secondToken}`)
+          .send({ token: challenge.token, simulatedNow: "2026-10-20T03:40:00.000Z" }),
+      ]);
+
+      expect(results.filter((result) => result.status === 200)).toHaveLength(1);
+      expect(results.filter((result) => result.status === 409)).toHaveLength(1);
+      expect(await AttendanceRecord.countDocuments({})).toBe(1);
+    });
+
+    it("also records and globally consumes a valid legacy signed QR", async () => {
+      const display = await QrDisplay.findOne({ terminalId: pairedDisplay.terminalId });
+      const ts = Math.floor(Date.now() / 1000);
+      const exp = ts + 45;
+      const nonce = crypto.randomBytes(12).toString("hex");
+      const signaturePayload = `1:${pairedDisplay.terminalId}:${ts}:${exp}:${nonce}`;
+      const sig = crypto.createHmac("sha256", display!.displayCredentialHash!)
+        .update(signaturePayload).digest("hex");
+      const signedPayload = JSON.stringify({ v: 1, tid: pairedDisplay.terminalId, ts, exp, n: nonce, sig });
+
+      const firstScan = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: signedPayload, simulatedNow: "2026-10-20T03:40:00.000Z" });
+      expect(firstScan.status).toBe(200);
+      expect((await QrToken.findOne({ token: signedPayload }))?.consumedAt).toBeInstanceOf(Date);
+
+      const replay = await request(app)
+        .post("/attendance/scan")
+        .set("Authorization", `Bearer ${employeeToken}`)
+        .send({ token: signedPayload });
+      expect(replay.status).toBe(409);
+      expect(replay.body.code).toBe(ApiErrorCode.ERR_QR_REPLAY_DETECTED);
+    });
+
     it("rejects expired QR token with 400 ERR_QR_EXPIRED", async () => {
       const challenge = await qrService.requestRotatingChallenge(
         pairedDisplay.displayId,
@@ -382,7 +595,7 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
       const res1 = await request(app)
         .post("/attendance/scan")
         .set("Authorization", `Bearer ${employeeToken}`)
-        .send({ token: challenge.token });
+        .send({ token: challenge.token, simulatedNow: "2026-10-20T12:00:00.000Z" });
       expect(res1.status).toBe(200);
 
       // Scan #2 with the exact same token by the SAME employee
@@ -439,6 +652,9 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
 
   describe("Midnight Boundary & Overnight Shift Handling", () => {
     it("accurately checks in on Day D and checks out across midnight on Day D+1 without duplicate record", async () => {
+      const policy = await AttendancePolicy.findOne({ isDefault: true });
+      employeeDoc.shiftId = policy!.shifts[1]._id;
+      await employeeDoc.save();
       // 1. Employee assigned to Overnight Shift (21:00 to 06:00 next day)
       // Check in at 21:30 IST on 2026-10-20 (16:00 UTC on 2026-10-20)
       const tokenIn = await qrService.requestRotatingChallenge(
@@ -490,6 +706,21 @@ describe("Attendance Scanning & Punctuality Engine (POST /attendance/scan)", () 
   });
 
   describe("Personal Attendance Queries (GET /attendance/today & /attendance/me)", () => {
+    it("ignores simulatedNow outside test mode", async () => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      try {
+        const response = await request(app)
+          .get("/attendance/today?simulatedNow=2026-10-20T03:30:00.000Z")
+          .set("Authorization", `Bearer ${employeeToken}`);
+        expect(response.status).toBe(200);
+        expect(response.body.dateKey).toBe(getDateKey(new Date(), "Asia/Kolkata"));
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+      }
+    });
+
     it("returns today's current punch status via GET /attendance/today", async () => {
       // 1. Before punch
       const resBefore = await request(app)

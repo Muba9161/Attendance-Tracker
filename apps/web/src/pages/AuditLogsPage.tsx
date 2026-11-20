@@ -18,6 +18,7 @@ import { Badge } from "../components/ui/Badge";
 import { Drawer } from "../components/ui/Drawer";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 
 export const AuditLogsPage: React.FC = () => {
@@ -37,7 +38,7 @@ export const AuditLogsPage: React.FC = () => {
   const [diffViewMode, setDiffViewMode] = useState<"structured" | "json">("structured");
   const [copiedPayload, setCopiedPayload] = useState(false);
 
-  const { data: auditData, isLoading, isFetching, refetch } = useAuditLogs(filters);
+  const { data: auditData, isLoading, isFetching, isError, error, refetch } = useAuditLogs(filters);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -244,6 +245,11 @@ export const AuditLogsPage: React.FC = () => {
       </Card>
 
       {/* Audit Table */}
+      {isError && auditData && (
+        <ErrorState title="Audit log refresh failed"
+          message={error instanceof Error ? error.message : "Showing the last successfully loaded audit entries."}
+          onRetry={() => void refetch()} isRetrying={isFetching} className="p-4" />
+      )}
       <Card className="border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs bg-white dark:bg-slate-900">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse" role="table">
@@ -281,6 +287,10 @@ export const AuditLogsPage: React.FC = () => {
                     </td>
                   </tr>
                 ))
+              ) : isError && !auditData ? (
+                <tr><td colSpan={6} className="px-6 py-8"><ErrorState title="Unable to load audit entries"
+                  message={error instanceof Error ? error.message : "The audit log request failed."}
+                  onRetry={() => void refetch()} isRetrying={isFetching} /></td></tr>
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center">

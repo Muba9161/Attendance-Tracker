@@ -20,7 +20,7 @@ export async function getAttendanceSummaryReport(
   query: ReportFilterQuery
 ): Promise<PaginatedResult<IAttendanceRecord> & { summary: Record<string, number> }> {
   const page = Math.max(1, query.page || 1);
-  const limit = Math.min(500, Math.max(1, query.limit || 20));
+  const limit = Math.min(5000, Math.max(1, query.limit || 20));
   const skip = (page - 1) * limit;
 
   const filter: Record<string, unknown> = {};
@@ -46,10 +46,13 @@ export async function getAttendanceSummaryReport(
     filter.status = query.status;
   }
 
+  const andFilters: Record<string, unknown>[] = [];
   const empTarget = query.employeeId || query.employee;
   if (empTarget) {
     if (Types.ObjectId.isValid(empTarget)) {
-      filter.$or = [{ employee: new Types.ObjectId(empTarget) }, { employeeId: empTarget }];
+      andFilters.push({
+        $or: [{ employee: new Types.ObjectId(empTarget) }, { employeeId: empTarget }],
+      });
     } else {
       filter.employeeId = empTarget.trim().toUpperCase();
     }
@@ -62,12 +65,15 @@ export async function getAttendanceSummaryReport(
     }).select("_id");
     const empIds = matchingEmployees.map((e) => e._id);
 
-    filter.$or = [
-      { employee: { $in: empIds } },
-      { employeeId: searchRegex },
-      { department: searchRegex },
-    ];
+    andFilters.push({
+      $or: [
+        { employee: { $in: empIds } },
+        { employeeId: searchRegex },
+        { department: searchRegex },
+      ],
+    });
   }
+  if (andFilters.length) filter.$and = andFilters;
 
   const [records, total, allFiltered] = await Promise.all([
     AttendanceRecord.find(filter)
@@ -133,7 +139,7 @@ export async function getAttendanceSummaryReport(
  */
 export async function getEmployeeWiseReport(query: ReportFilterQuery) {
   const page = Math.max(1, query.page || 1);
-  const limit = Math.min(500, Math.max(1, query.limit || 20));
+  const limit = Math.min(5000, Math.max(1, query.limit || 20));
   const skip = (page - 1) * limit;
 
   // Build employee filter
@@ -151,6 +157,14 @@ export async function getEmployeeWiseReport(query: ReportFilterQuery) {
       { employeeId: searchRegex },
       { department: searchRegex },
     ];
+  }
+  const employeeTarget = query.employeeId || query.employee;
+  if (employeeTarget) {
+    if (Types.ObjectId.isValid(employeeTarget)) {
+      empFilter._id = new Types.ObjectId(employeeTarget);
+    } else {
+      empFilter.employeeId = employeeTarget.trim().toUpperCase();
+    }
   }
 
   const [employees, totalEmployees] = await Promise.all([
@@ -356,7 +370,7 @@ export async function getDepartmentWiseReport(query: ReportFilterQuery) {
  */
 export async function getLateReport(query: ReportFilterQuery) {
   const page = Math.max(1, query.page || 1);
-  const limit = Math.min(500, Math.max(1, query.limit || 20));
+  const limit = Math.min(5000, Math.max(1, query.limit || 20));
   const skip = (page - 1) * limit;
 
   const filter: Record<string, unknown> = {
@@ -423,7 +437,7 @@ export async function getLateReport(query: ReportFilterQuery) {
  */
 export async function getWfhReport(query: WfhReportFilterQuery) {
   const page = Math.max(1, query.page || 1);
-  const limit = Math.min(500, Math.max(1, query.limit || 20));
+  const limit = Math.min(5000, Math.max(1, query.limit || 20));
   const skip = (page - 1) * limit;
 
   const filter: Record<string, unknown> = {};

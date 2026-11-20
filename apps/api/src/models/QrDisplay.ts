@@ -17,6 +17,7 @@ export interface IQrDisplay extends Document {
   pairedAt?: Date;
   lastSeen?: Date;
   lastHeartbeat?: Date;
+  archivedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,7 +41,7 @@ const QrDisplaySchema = new Schema<IQrDisplay>(
       type: String,
       required: [true, "Location description is required"],
       trim: true,
-      maxlength: [100, "Location cannot exceed 100 characters"],
+      maxlength: [200, "Location cannot exceed 200 characters"],
     },
     pairingCode: {
       type: String,
@@ -93,6 +94,11 @@ const QrDisplaySchema = new Schema<IQrDisplay>(
     lastHeartbeat: {
       type: Date,
       default: null,
+    },
+    archivedAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
   },
   {

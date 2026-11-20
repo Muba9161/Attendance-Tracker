@@ -103,19 +103,19 @@ export declare const AuthUserSchema: z.ZodObject<{
     designation: z.ZodOptional<z.ZodString>;
     isVerified: z.ZodBoolean;
 }, "strip", z.ZodTypeAny, {
-    employeeId: string;
-    email: string;
     _id: string;
+    employeeId: string;
     name: string;
+    email: string;
     role: UserRole;
     isVerified: boolean;
     department?: string | undefined;
     designation?: string | undefined;
 }, {
-    employeeId: string;
-    email: string;
     _id: string;
+    employeeId: string;
     name: string;
+    email: string;
     role: UserRole;
     isVerified: boolean;
     department?: string | undefined;
@@ -130,20 +130,35 @@ export type AuthUser = z.infer<typeof AuthUserSchema>;
  * - At least one digit or special character
  */
 export declare function isPasswordStrong(password: string): boolean;
-export declare const SignupRequestSchema: z.ZodObject<{
-    email: z.ZodString;
+export declare const SignupRequestSchema: z.ZodEffects<z.ZodObject<{
+    employeeId: z.ZodOptional<z.ZodString>;
+    email: z.ZodOptional<z.ZodString>;
     password: z.ZodEffects<z.ZodString, string, string>;
-    name: z.ZodString;
+    name: z.ZodOptional<z.ZodString>;
     inviteToken: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     password: string;
-    email: string;
-    name: string;
+    employeeId?: string | undefined;
+    name?: string | undefined;
+    email?: string | undefined;
     inviteToken?: string | undefined;
 }, {
     password: string;
-    email: string;
-    name: string;
+    employeeId?: string | undefined;
+    name?: string | undefined;
+    email?: string | undefined;
+    inviteToken?: string | undefined;
+}>, {
+    password: string;
+    employeeId?: string | undefined;
+    name?: string | undefined;
+    email?: string | undefined;
+    inviteToken?: string | undefined;
+}, {
+    password: string;
+    employeeId?: string | undefined;
+    name?: string | undefined;
+    email?: string | undefined;
     inviteToken?: string | undefined;
 }>;
 export type SignupRequest = z.infer<typeof SignupRequestSchema>;
@@ -159,11 +174,11 @@ export declare const ResetPasswordRequestSchema: z.ZodObject<{
     token: z.ZodString;
     password: z.ZodEffects<z.ZodString, string, string>;
 }, "strip", z.ZodTypeAny, {
-    password: string;
     token: string;
+    password: string;
 }, {
-    password: string;
     token: string;
+    password: string;
 }>;
 export type ResetPasswordRequest = z.infer<typeof ResetPasswordRequestSchema>;
 export declare const VerifyEmailRequestSchema: z.ZodObject<{
@@ -175,6 +190,23 @@ export declare const VerifyEmailRequestSchema: z.ZodObject<{
 }>;
 export type VerifyEmailRequest = z.infer<typeof VerifyEmailRequestSchema>;
 export declare const ResendVerificationRequestSchema: z.ZodObject<{
+    email: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    email: string;
+}, {
+    email: string;
+}>;
+export declare const VerifySignupOtpRequestSchema: z.ZodObject<{
+    email: z.ZodString;
+    otp: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    otp: string;
+    email: string;
+}, {
+    otp: string;
+    email: string;
+}>;
+export declare const ResendSignupOtpRequestSchema: z.ZodObject<{
     email: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     email: string;
@@ -197,8 +229,8 @@ export declare const StaffInviteRequestSchema: z.ZodObject<{
 }, {
     email: string;
     name?: string | undefined;
-    role?: UserRole.ADMIN | UserRole.HR | UserRole.HR_ADMIN | undefined;
     department?: string | undefined;
+    role?: UserRole.ADMIN | UserRole.HR | UserRole.HR_ADMIN | undefined;
     designation?: string | undefined;
 }>;
 export type StaffInviteRequest = z.infer<typeof StaffInviteRequestSchema>;

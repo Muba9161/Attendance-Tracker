@@ -93,11 +93,11 @@ export declare const QrTokenRequestSchema: z.ZodObject<{
     displayId: z.ZodOptional<z.ZodString>;
     terminalId: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    terminalId?: string | undefined;
     displayId?: string | undefined;
+    terminalId?: string | undefined;
 }, {
-    terminalId?: string | undefined;
     displayId?: string | undefined;
+    terminalId?: string | undefined;
 }>;
 export type QrTokenRequest = z.infer<typeof QrTokenRequestSchema>;
 export declare const QrTokenResponseSchema: z.ZodObject<{
@@ -111,21 +111,21 @@ export declare const QrTokenResponseSchema: z.ZodObject<{
     ttlSeconds: z.ZodNumber;
     serverTime: z.ZodNumber;
 }, "strip", z.ZodTypeAny, {
-    qrPayload: string;
-    token: string;
+    displayId: string;
     terminalId: string;
     success: boolean;
-    displayId: string;
+    token: string;
+    qrPayload: string;
     issuedAt: string;
     expiresAt: string;
     ttlSeconds: number;
     serverTime: number;
 }, {
-    qrPayload: string;
-    token: string;
+    displayId: string;
     terminalId: string;
     success: boolean;
-    displayId: string;
+    token: string;
+    qrPayload: string;
     issuedAt: string;
     expiresAt: string;
     ttlSeconds: number;
@@ -155,30 +155,30 @@ export declare const TerminalRecordSchema: z.ZodObject<{
     updatedAt: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     status: TerminalStatus;
-    _id: string;
     name: string;
-    isActive: boolean;
-    createdAt: string;
-    terminalId: string;
     location: string;
+    isActive: boolean;
+    terminalId: string;
+    _id: string;
     isPaired: boolean;
-    updatedAt?: string | undefined;
+    createdAt: string;
     pairingCode?: string | undefined;
     pairingCodeExpiresAt?: string | undefined;
     lastHeartbeat?: string | undefined;
+    updatedAt?: string | undefined;
 }, {
-    _id: string;
     name: string;
-    isActive: boolean;
-    createdAt: string;
-    terminalId: string;
     location: string;
+    isActive: boolean;
+    terminalId: string;
+    _id: string;
     isPaired: boolean;
+    createdAt: string;
     status?: TerminalStatus | undefined;
-    updatedAt?: string | undefined;
     pairingCode?: string | undefined;
     pairingCodeExpiresAt?: string | undefined;
     lastHeartbeat?: string | undefined;
+    updatedAt?: string | undefined;
 }>;
 export type TerminalRecord = z.infer<typeof TerminalRecordSchema>;
 //# sourceMappingURL=terminal.d.ts.map

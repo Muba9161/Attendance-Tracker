@@ -414,6 +414,26 @@ describe("Executive Dashboard, Reporting Engine & Audit Log Explorer", () => {
       expect(s.totalHours).toBe(47.3);
     });
 
+    it("keeps employee ID and free-text filters conjunctive", async () => {
+      const res = await request(app)
+        .get(`/reports/attendance?employee=${emp1._id.toString()}&search=Bob`)
+        .set("Authorization", `Bearer ${hrToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
+      expect(res.body.summary.totalRecords).toBe(0);
+    });
+
+    it("employee-wise report honors the selected employee ID", async () => {
+      const res = await request(app)
+        .get("/reports/employee-wise?employeeId=EMP-003&startDate=2026-10-19&endDate=2026-10-20")
+        .set("Authorization", `Bearer ${hrToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].employeeId).toBe("EMP-003");
+    });
+
     it("GET /reports/employee-wise aggregates exact individual work hours and attendance rates", async () => {
       const res = await request(app)
         .get("/reports/employee-wise?startDate=2026-10-19&endDate=2026-10-20")
@@ -548,6 +568,27 @@ describe("Executive Dashboard, Reporting Engine & Audit Log Explorer", () => {
       expect(res.text).toContain("Employee ID,Name,Department,Designation");
       expect(res.text).toContain("EMP-001,Alice Smith,Engineering");
     });
+
+    it("exports all filtered attendance rows beyond the former 500-row cap", async () => {
+      await AttendanceRecord.insertMany(
+        Array.from({ length: 501 }, (_, index) => ({
+          employee: emp1._id,
+          employeeId: emp1.employeeId,
+          department: emp1.department,
+          dateKey: new Date(Date.UTC(2023, 0, index + 1)).toISOString().slice(0, 10),
+          status: AttendanceStatus.CHECKED_OUT,
+          durationMinutes: 480,
+          isLate: false,
+        }))
+      );
+
+      const res = await request(app)
+        .get("/reports/attendance/export?employeeId=EMP-001")
+        .set("Authorization", `Bearer ${hrToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.text.trim().split("\n")).toHaveLength(504); // header + 503 matching records
+    });
   });
 
   describe("GET /audit-logs (Security & Operational Trail)", () => {
@@ -583,6 +624,15 @@ describe("Executive Dashboard, Reporting Engine & Audit Log Explorer", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.length).toBe(1);
       expect(res.body.data[0].reason).toMatch(/Adjusted missing checkout/i);
+    });
+
+    it("applies audit actor and free-text filters together", async () => {
+      const res = await request(app)
+        .get(`/audit-logs?actor=${employeeUser._id.toString()}&search=Adjusted missing checkout`)
+        .set("Authorization", `Bearer ${hrToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveLength(0);
     });
 
     it("blocks regular employee from viewing audit logs with 403 ERR_FORBIDDEN", async () => {

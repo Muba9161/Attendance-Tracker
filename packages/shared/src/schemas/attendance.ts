@@ -13,6 +13,7 @@ export const AttendanceScanRequestSchema = z
     qrPayload: z.string().trim().min(1).optional(),
     action: z.enum(["CHECK_IN", "CHECK_OUT"]).optional(),
     simulatedNow: z.string().optional(),
+    earlyCheckoutReason: z.string().max(500).optional(),
   })
   .refine((data) => data.token || data.qrPayload, {
     message: "Either token or qrPayload is required",
@@ -125,7 +126,16 @@ export type AttendanceFilterQuery = z.infer<typeof AttendanceFilterQuerySchema>;
 
 export const AttendanceCorrectionRequestSchema = z
   .object({
-    status: z.nativeEnum(AttendanceStatus).optional(),
+    status: z
+      .enum([
+        AttendanceStatus.PRESENT,
+        AttendanceStatus.LATE,
+        AttendanceStatus.HALF_DAY,
+        AttendanceStatus.CHECKED_OUT,
+        AttendanceStatus.ABSENT,
+        AttendanceStatus.INCOMPLETE,
+      ])
+      .optional(),
     checkInTime: z.string().datetime().nullable().optional(),
     checkOutTime: z.string().datetime().nullable().optional(),
     reason: z
@@ -133,8 +143,6 @@ export const AttendanceCorrectionRequestSchema = z
       .min(5, "Justification reason must be at least 5 characters")
       .max(500, "Justification reason cannot exceed 500 characters")
       .trim(),
-    isLate: z.boolean().optional(),
-    isMissingCheckout: z.boolean().optional(),
   })
   .refine(
     (data) => {

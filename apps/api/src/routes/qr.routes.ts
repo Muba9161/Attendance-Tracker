@@ -61,4 +61,7 @@ router.post("/:id/authorize", qrController.authorizeDisplay);
 router.post("/:id/revoke", qrController.revokeDisplay);
 router.patch("/:id/revoke", qrController.revokeDisplay);
 
+// Soft archive a single display; historical audit and attendance records remain intact.
+router.delete("/:id", qrController.archiveDisplay);
+
 export const qrRouter = router;

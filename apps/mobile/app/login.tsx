@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { Image, View, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, type TextStyle } from 'react-native';
+import heroLogo from '../assets/vorldx-hero-logo.webp';
 import { useRouter } from 'expo-router';
 import { Mail, Lock, ArrowRight, ArrowLeft, Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -17,6 +18,10 @@ import {
 import { colors, spacing } from '../src/theme/tokens';
 import { useResponsive } from '../src/lib/responsive';
 import { ApiError } from '../src/services/api';
+
+const webInputStyle = Platform.OS === 'web'
+  ? ({ outlineStyle: 'none', outlineWidth: 0, borderWidth: 0 } as unknown as TextStyle)
+  : undefined;
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -56,7 +61,7 @@ export default function LoginScreen() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined);
       if (err instanceof ApiError) {
         if (err.code === 'ERR_ACCOUNT_LOCKED') {
-          setError('Account locked due to 5 consecutive failed attempts. Please wait 15 minutes or contact HR.');
+          setError('Account is temporarily locked. Enter the correct password or reset it to regain access.');
         } else if (err.code === 'ERR_EMPLOYEE_INACTIVE') {
           setError('Your employee profile is inactive. Please contact HR administrator.');
         } else if (err.code === 'ERR_INVALID_CREDENTIALS') {
@@ -99,6 +104,13 @@ export default function LoginScreen() {
 
           {/* Hero Section */}
           <View style={styles.hero}>
+            <Image
+              source={heroLogo}
+              style={styles.brandLogo}
+              resizeMode="contain"
+              accessible
+              accessibilityLabel="VORLDX Industries Private Limited logo"
+            />
             <Text variant="display" align="center" style={styles.headline} numberOfLines={1}>
               Your workday, in one place.
             </Text>
@@ -138,6 +150,7 @@ export default function LoginScreen() {
                   }}
                   placeholder="EMP-1001 or aarav.sharma@vorldx.demo"
                   returnKeyType="next"
+                  inputStyle={webInputStyle}
                   value={identifier}
                 />
               </Field>
@@ -154,6 +167,7 @@ export default function LoginScreen() {
                   onSubmitEditing={handleLogin}
                   placeholder="Your password"
                   returnKeyType="go"
+                  inputStyle={webInputStyle}
                   value={password}
                 />
               </Field>
@@ -225,6 +239,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  brandLogo: {
+    width: 68,
+    height: 68,
   },
   headline: {
     fontSize: 24,

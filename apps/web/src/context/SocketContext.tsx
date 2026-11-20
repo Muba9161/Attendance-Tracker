@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { io as ioClient, Socket } from "socket.io-client";
 import { useQueryClient } from "@tanstack/react-query";
-import { tokenStorage } from "../api/client";
+import { getApiBaseUrl, tokenStorage } from "../api/client";
 import { useAuth } from "./AuthContext";
 import { useToast } from "../components/ui/Toast";
-import { SocketEvent } from "@vorldx/shared";
+import { SocketEvent, UserRole } from "@vorldx/shared";
+import { requestNotificationEventKey } from "../utils/recentEventDedupe";
 
 interface SocketContextType {
   socket: Socket | null;
@@ -40,14 +41,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const token = tokenStorage.getAccessToken();
     if (!token) return;
 
-    // Connect to WebSocket server
-    const isLocalhost =
-      typeof window !== "undefined" &&
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-    const wsUrl =
-      import.meta.env.VITE_API_URL ||
-      import.meta.env.NEXT_PUBLIC_API_URL ||
-      (isLocalhost ? undefined : "https://attendance-tracker-56du.onrender.com");
+    // Keep WebSocket traffic on the same explicitly selected API as REST calls.
+    let wsUrl: string | undefined;
+    try {
+      wsUrl = getApiBaseUrl() || undefined;
+    } catch (error) {
+      toast({
+        type: "error",
+        title: "API configuration error",
+        description: error instanceof Error ? error.message : "Configure VITE_API_URL for this environment.",
+      });
+      return;
+    }
 
     const client = ioClient(wsUrl, {
       auth: { token },
@@ -91,22 +96,29 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     );
 
-    client.on(SocketEvent.WFH_CREATED, (data: { employeeName?: string; dateKey?: string }) => {
+    client.on(SocketEvent.WFH_CREATED, (data: { requestId?: string; eventId?: string; employeeName?: string; dateKey?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       toast({
         type: "info",
         title: "New WFH Request Submitted",
         description: `${data.employeeName || "An employee"} requested WFH for ${data.dateKey}.`,
+          dedupeKey: data.eventId
+            ? requestNotificationEventKey("wfh", data.eventId)
+            : data.requestId
+              ? requestNotificationEventKey("wfh", data.requestId)
+              : undefined,
       });
     });
 
     client.on(SocketEvent.WFH_DECIDED, (data: { employeeName?: string; status?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
-      toast({
-        type: "info",
-        title: "WFH Request Decided",
-        description: `Request for ${data.employeeName || "Employee"} was ${data.status}.`,
-      });
+      if (user?.role === UserRole.EMPLOYEE) {
+        toast({
+          type: "info",
+          title: "WFH Request Decided",
+          description: `Request for ${data.employeeName || "Employee"} was ${data.status}.`,
+        });
+      }
     });
 
     client.on(SocketEvent.EMPLOYEE_REGISTERED, (data: { name?: string; employeeId?: string }) => {
@@ -142,6 +154,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         employeeId?: string;
         typeName?: string;
         workingDays?: number;
+        requestId?: string;
       }) => {
         queryClient.invalidateQueries({ queryKey: ["leave-requests"] });
         queryClient.invalidateQueries({ queryKey: ["all-leave-balances"] });
@@ -152,6 +165,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           description: `${data.employeeName || data.employeeId || "An employee"} applied for ${
             data.typeName || "leave"
           } (${data.workingDays || 1} day${(data.workingDays || 1) > 1 ? "s" : ""}).`,
+          dedupeKey: data.requestId ? requestNotificationEventKey("leave", data.requestId) : undefined,
         });
       }
     );
@@ -170,7 +184,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
         queryClient.invalidateQueries({ queryKey: ["attendance"] });
         queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
-
+        if (user?.role !== UserRole.EMPLOYEE) return;
         toast({
           type: data.status === "APPROVED" ? "success" : "info",
           title: `Leave ${data.status === "APPROVED" ? "Approved" : data.status === "CANCELLED" ? "Cancelled" : "Rejected"}`,
@@ -303,9 +317,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setSocket(client);
 
     return () => {
+      client.removeAllListeners();
       client.disconnect();
     };
-  }, [isAuthenticated, queryClient]);
+  }, [isAuthenticated, queryClient, toast, user?.id, user?.role]);
 
   return (
     <SocketContext.Provider value={{ socket, isConnected, isReconnecting }}>

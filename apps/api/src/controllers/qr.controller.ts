@@ -150,6 +150,27 @@ export const revokeDisplay = asyncHandler(async (req: Request, res: Response) =>
 });
 
 /**
+ * HR / Admin: Soft archive a display terminal from the active management list
+ */
+export const archiveDisplay = asyncHandler(async (req: Request, res: Response) => {
+  const actor = req.user
+    ? { id: req.user.userId, employeeId: req.user.employeeId, role: req.user.role }
+    : undefined;
+
+  const display = await qrService.archiveDisplay(
+    req.params.id,
+    req.body?.reason,
+    actor
+  );
+
+  res.status(200).json({
+    success: true,
+    message: "Display terminal archived and removed from the active management list.",
+    data: display,
+  });
+});
+
+/**
  * Display Kiosk: Request new rotating QR challenge
  */
 export const requestRotatingToken = asyncHandler(async (req: Request, res: Response) => {

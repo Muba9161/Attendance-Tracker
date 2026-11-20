@@ -1,17 +1,72 @@
 import crypto from "crypto";
+import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { User, IUser, hashPassword } from "../models/User";
 import { Employee, IEmployee } from "../models/Employee";
 import { RegistrationOtp } from "../models/RegistrationOtp";
-import { StaffInvitation } from "../models/StaffInvitation";
+import { IStaffInvitation, StaffInvitation } from "../models/StaffInvitation";
 import { StaffSession } from "../models/StaffSession";
 import { AuditEvent } from "../models/AuditEvent";
 import { env } from "../config/env";
 import { AppError } from "../utils/AppError";
+import { logger } from "../utils/logger";
 import { eventEmitterService } from "./eventEmitter.service";
-import { getMailAdapter } from "./mail";
-import { ApiErrorCode, UserRole, isPasswordStrong } from "@vorldx/shared";
+import { reauthorizeUserSockets } from "../sockets/socketServer";
+import { BrevoMailDeliveryError, getBrevoMailAdapter, getMailAdapter, getSmtpMailAdapter } from "./mail";
+import { ApiErrorCode, UserRole, WorkType, isPasswordStrong } from "@vorldx/shared";
+
+function getSignupDuplicateField(error: unknown): string | undefined {
+  const mongoError = error as {
+    code?: number;
+    keyPattern?: Record<string, unknown>;
+    keyValue?: Record<string, unknown>;
+    message?: string;
+  };
+
+  if (mongoError?.code !== 11000) return undefined;
+
+  const indexedField = Object.keys(mongoError.keyPattern || mongoError.keyValue || {})[0];
+  if (indexedField) return indexedField;
+
+  const indexMatch = mongoError.message?.match(/index:\s+[^\s]*?(email|employeeId)_1\b/i);
+  return indexMatch?.[1]?.toLowerCase();
+}
+
+function getSignupDuplicateError(field?: string): AppError {
+  if (field === "email") {
+    return AppError.conflict(
+      "An account with this email address already exists.",
+      ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
+    );
+  }
+
+  if (field === "employeeId") {
+    return AppError.conflict(
+      "The employee ID was claimed during registration. Please retry signup.",
+      ApiErrorCode.ERR_BAD_REQUEST
+    );
+  }
+
+  return AppError.conflict(
+    "A signup record conflicts with an existing unique account field.",
+    ApiErrorCode.ERR_BAD_REQUEST
+  );
+}
+
+function getSignupEmailDeliveryErrorMessage(error: unknown): string {
+  if (
+    error instanceof BrevoMailDeliveryError &&
+    error.providerCode === "unauthorized" &&
+    /unrecognised IP address/i.test(error.providerMessage)
+  ) {
+    const ipAddress = error.providerMessage.match(/unrecognised IP address\s+([0-9.]+)/i)?.[1];
+    return ipAddress
+      ? `Brevo blocked this server IP (${ipAddress}). Add it to the authorized IPs for this Brevo API key, then retry signup.`
+      : "Brevo blocked this server IP. Add the server's outbound IP to the authorized IPs for this Brevo API key, then retry signup.";
+  }
+  return "We could not send a verification code. Please check the email service configuration and try again.";
+}
 
 export interface TokenPayload {
   userId: string;
@@ -24,8 +79,9 @@ export interface RegisterStartResult {
   employeeId: string;
   email: string;
   expiresInMinutes: number;
+  resendAfterSeconds: number;
   simulatedDemoOtp?: string;
-  isDemoMode: boolean;
+  isDemoMode?: boolean;
 }
 
 export interface LoginResult {
@@ -51,6 +107,142 @@ export interface LoginResult {
 }
 
 export class AuthService {
+  /** Creates an active HR login directly for an administrator when mail setup is unavailable. */
+  public async createHrAccountWithPassword(
+    adminUserId: string,
+    input: { name: string; email: string; department: string; designation: string; password: string }
+  ): Promise<{
+    success: true;
+    message: string;
+    data: { id: string; email: string; employeeId: string; role: UserRole.HR; status: string };
+  }> {
+    const admin = await User.findById(adminUserId);
+    if (!admin || admin.role !== UserRole.ADMIN) {
+      throw AppError.forbidden("Only system administrators can create HR accounts.", ApiErrorCode.ERR_FORBIDDEN);
+    }
+    if (!isPasswordStrong(input.password)) {
+      throw AppError.badRequest(
+        "Password must be at least 8 characters and contain uppercase, lowercase, and a number or symbol.",
+        ApiErrorCode.ERR_INVALID_INPUT
+      );
+    }
+
+    const email = input.email.trim().toLowerCase();
+    if (await User.exists({ email })) {
+      throw AppError.conflict("A user account with this email already exists.", ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED);
+    }
+    if (await Employee.exists({ email })) {
+      throw AppError.conflict("An employee profile with this email already exists.", ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED);
+    }
+
+    let employeeId = "";
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const candidate = `HR-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+      const [userExists, employeeExists] = await Promise.all([
+        User.exists({ employeeId: candidate }),
+        Employee.exists({ employeeId: candidate }),
+      ]);
+      if (!userExists && !employeeExists) {
+        employeeId = candidate;
+        break;
+      }
+    }
+    if (!employeeId) throw AppError.internal("Unable to allocate a unique HR employee ID.");
+
+    const user = await User.create({
+      employeeId,
+      email,
+      passwordHash: await hashPassword(input.password),
+      role: UserRole.HR,
+      status: "ACTIVE",
+      isEmailVerified: true,
+      refreshTokenHash: null,
+    });
+
+    try {
+      await Employee.create({
+        employeeId,
+        name: input.name.trim(),
+        email,
+        department: input.department.trim(),
+        designation: input.designation.trim(),
+        workType: WorkType.FULL_TIME,
+        joiningDate: new Date().toISOString().slice(0, 10),
+        isActive: true,
+        userId: user._id,
+      });
+    } catch (error: unknown) {
+      await User.deleteOne({ _id: user._id });
+      const dbError = error as { code?: number };
+      if (dbError.code === 11000) {
+        throw AppError.conflict("An account or employee profile already uses this email or ID.", ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED);
+      }
+      throw error;
+    }
+
+    try {
+      await StaffInvitation.deleteMany({ email, role: UserRole.HR, isAccepted: false });
+      await AuditEvent.create({
+        entityType: "USER",
+        entityId: user._id.toString(),
+        performedBy: admin._id,
+        performedByEmployeeId: admin.employeeId,
+        action: "HR_ACCOUNT_CREATED_BY_ADMIN",
+        reason: `Created an HR account for ${email}`,
+        timestamp: new Date(),
+        metadata: { targetEmail: email, employeeId, role: UserRole.HR },
+      });
+    } catch (error: unknown) {
+      logger.error("HR account was created but follow-up cleanup or audit logging failed", {
+        userId: user._id.toString(),
+        reason: error instanceof Error ? error.message : "Unknown database error",
+      });
+    }
+
+    return {
+      success: true,
+      message: "HR account created. The teammate can sign in with the email and password set by the administrator.",
+      data: { id: user._id.toString(), email, employeeId, role: UserRole.HR, status: user.status },
+    };
+  }
+
+  private async deliverSignupOtp(
+    email: string,
+    name: string,
+    otp: string,
+    expiresInMinutes = 5
+  ): Promise<void> {
+    const safeName = name.replace(/[&<>"']/g, (character) => {
+      const entities: Record<string, string> = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      };
+      return entities[character];
+    });
+    const delivery = await getBrevoMailAdapter().sendMail({
+      to: email,
+      subject: "Your VORLDX employee signup verification code",
+      html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#172033"><h2>VORLDX Employee Attendance System</h2><p>Hello ${safeName},</p><p>Use this one-time password to verify your employee account:</p><p style="font-size:30px;font-weight:700;letter-spacing:8px;padding:16px;background:#f1f5f9;text-align:center">${otp}</p><p>This code expires in ${expiresInMinutes} minutes.</p><p style="color:#b42318"><strong>Security:</strong> Never share this code with anyone. VORLDX staff will never ask you for it.</p></div>`,
+      text: `VORLDX Employee Attendance System\n\nHello ${name},\n\nYour account verification code is ${otp}. It expires in ${expiresInMinutes} minutes.\n\nNever share this code with anyone.`,
+      meta: { type: "SIGNUP_OTP", recipientName: name, role: UserRole.EMPLOYEE },
+    });
+    if (!delivery.success) throw new Error("Brevo did not accept the verification email.");
+  }
+
+  private async deliverMobileActivationOtp(email: string, name: string, otp: string): Promise<void> {
+    const safeName = name.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
+    await getSmtpMailAdapter().sendMail({
+      to: email,
+      subject: "Your VORLDX account activation code",
+      html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#172033"><h2>VORLDX INDUSTRIES PRIVATE LIMITED</h2><p>Hello ${safeName},</p><p>Verification code sent to your registered email.</p><p style="font-size:30px;font-weight:700;letter-spacing:8px;padding:16px;background:#f1f5f9;text-align:center">${otp}</p><p>This code expires in ${env.OTP_EXPIRY_MINUTES} minutes. Never share this code.</p></div>`,
+      text: `VORLDX INDUSTRIES PRIVATE LIMITED\n\nHello ${name},\nVerification code sent to your registered email.\nYour activation code is ${otp}. It expires in ${env.OTP_EXPIRY_MINUTES} minutes. Never share this code.`,
+      meta: { type: "SIGNUP_OTP", recipientName: name, role: UserRole.EMPLOYEE },
+    });
+  }
+
   /**
    * Generates a short-lived JWT access token
    */
@@ -114,19 +306,19 @@ export class AuthService {
       );
     }
 
-    // Check account lockout status
-    if (user.lockoutUntil && user.lockoutUntil.getTime() > Date.now()) {
-      const remainingMinutes = Math.ceil((user.lockoutUntil.getTime() - Date.now()) / (60 * 1000));
-      throw new AppError(
-        423,
-        ApiErrorCode.ERR_ACCOUNT_LOCKED,
-        `Account is temporarily locked due to repeated failed login attempts. Please try again after ${remainingMinutes} minute(s).`
-      );
-    }
-
-    // Verify password with bcrypt
+    // A valid password can recover a temporarily locked account immediately.
+    // Failed passwords remain blocked until the normal lockout expires.
+    const isAccountLocked = Boolean(user.lockoutUntil && user.lockoutUntil.getTime() > Date.now());
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
+      if (isAccountLocked) {
+        throw new AppError(
+          423,
+          ApiErrorCode.ERR_ACCOUNT_LOCKED,
+          "Account is temporarily locked after repeated failed attempts. Enter the correct password or reset it to regain access."
+        );
+      }
+
       const attempts = (user.failedLoginAttempts || 0) + 1;
       if (attempts >= env.MAX_LOGIN_ATTEMPTS) {
         const lockoutUntil = new Date(Date.now() + env.LOCKOUT_MINUTES * 60 * 1000);
@@ -147,7 +339,7 @@ export class AuthService {
         throw new AppError(
           423,
           ApiErrorCode.ERR_ACCOUNT_LOCKED,
-          `Account is temporarily locked due to ${env.MAX_LOGIN_ATTEMPTS} consecutive failed login attempts. Please try again after ${env.LOCKOUT_MINUTES} minutes.`
+          `Account is temporarily locked after ${env.MAX_LOGIN_ATTEMPTS} consecutive failed login attempts. Enter the correct password or reset it to regain access.`
         );
       }
 
@@ -227,15 +419,15 @@ export class AuthService {
       },
       employee: employee
         ? {
-            _id: employee._id.toString(),
-            employeeId: employee.employeeId,
-            name: employee.name,
-            email: employee.email,
-            department: employee.department,
-            designation: employee.designation,
-            workType: employee.workType,
-            shiftId: employee.shiftId ? employee.shiftId.toString() : null,
-          }
+          _id: employee._id.toString(),
+          employeeId: employee.employeeId,
+          name: employee.name,
+          email: employee.email,
+          department: employee.department,
+          designation: employee.designation,
+          workType: employee.workType,
+          shiftId: employee.shiftId ? employee.shiftId.toString() : null,
+        }
         : null,
     };
   }
@@ -324,17 +516,17 @@ export class AuthService {
       },
       employee: employee
         ? {
-            _id: employee._id,
-            employeeId: employee.employeeId,
-            name: employee.name,
-            email: employee.email,
-            department: employee.department,
-            designation: employee.designation,
-            workType: employee.workType,
-            shiftId: employee.shiftId,
-            joiningDate: employee.joiningDate,
-            isActive: employee.isActive,
-          }
+          _id: employee._id,
+          employeeId: employee.employeeId,
+          name: employee.name,
+          email: employee.email,
+          department: employee.department,
+          designation: employee.designation,
+          workType: employee.workType,
+          shiftId: employee.shiftId,
+          joiningDate: employee.joiningDate,
+          isActive: employee.isActive,
+        }
         : null,
     };
   }
@@ -342,7 +534,7 @@ export class AuthService {
   /**
    * Initiates employee self-registration by generating and securely hashing a 6-digit OTP
    */
-  public async startRegistration(employeeId: string): Promise<RegisterStartResult> {
+  public async startRegistration(employeeId: string, mobileActivation = true): Promise<RegisterStartResult> {
     const normalizedId = employeeId.trim().toUpperCase();
     const employee = await Employee.findOne({ employeeId: normalizedId });
 
@@ -378,6 +570,17 @@ export class AuthService {
       );
     }
 
+    if (mobileActivation) {
+      const pendingOtp = await RegistrationOtp.findOne({ employeeId: normalizedId, isUsed: false });
+      if (pendingOtp) {
+        const elapsed = Date.now() - pendingOtp.createdAt.getTime();
+        if (elapsed < 60_000) {
+          throw new AppError(429, ApiErrorCode.ERR_INVALID_INPUT,
+            `Please wait ${Math.ceil((60_000 - elapsed) / 1000)} seconds before requesting another code.`);
+        }
+      }
+    }
+
     // Generate random 6-digit OTP and store only its secure hash
     const rawOtp = crypto.randomInt(100000, 1000000).toString();
     const hashedCode = await bcrypt.hash(rawOtp, 10);
@@ -395,15 +598,57 @@ export class AuthService {
       isUsed: false,
     });
 
-    const isDemoMode = env.NODE_ENV !== "production" && env.DEMO_OTP_MODE === true;
+    const isDemoMode = !mobileActivation && env.NODE_ENV !== "production" && env.DEMO_OTP_MODE === true;
+    if (!isDemoMode) {
+      try {
+        if (mobileActivation) await this.deliverMobileActivationOtp(employee.email, employee.name, rawOtp);
+        else await this.deliverSignupOtp(employee.email, employee.name, rawOtp, env.OTP_EXPIRY_MINUTES);
+      } catch (error) {
+        await RegistrationOtp.deleteMany({ employeeId: normalizedId });
+        logger.error("Employee registration OTP delivery failed", {
+          reason: mobileActivation ? "SMTP delivery failed" : "Configured email delivery failed",
+        });
+        throw new AppError(503, ApiErrorCode.ERR_INTERNAL_SERVER, mobileActivation
+          ? "We could not send a verification code. Check SMTP configuration and try again."
+          : getSignupEmailDeliveryErrorMessage(error));
+      }
+    }
 
     return {
       employeeId: normalizedId,
       email: employee.email,
       expiresInMinutes: env.OTP_EXPIRY_MINUTES,
+      resendAfterSeconds: 60,
       simulatedDemoOtp: isDemoMode ? rawOtp : undefined,
       isDemoMode,
     };
+  }
+
+  public async resendRegistrationOtp(employeeId: string): Promise<RegisterStartResult> {
+    const normalizedId = employeeId.trim().toUpperCase();
+    const employee = await Employee.findOne({ employeeId: normalizedId });
+    if (!employee) throw AppError.notFound("Employee ID does not exist in company directory", ApiErrorCode.ERR_EMPLOYEE_NOT_FOUND);
+    if (!employee.isActive) throw new AppError(403, ApiErrorCode.ERR_EMPLOYEE_INACTIVE, "Employee profile is inactive. Please contact Human Resources.");
+    if (employee.userId || await User.exists({ employeeId: normalizedId })) {
+      throw new AppError(409, ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED, "Account is already registered for this Employee ID. Please log in.");
+    }
+    const existing = await RegistrationOtp.findOne({ employeeId: normalizedId, isUsed: false });
+    if (!existing) throw AppError.badRequest("Verification code has expired or does not exist. Start registration again.", ApiErrorCode.ERR_OTP_EXPIRED);
+    const elapsed = Date.now() - existing.createdAt.getTime();
+    if (elapsed < 60_000) {
+      throw new AppError(429, ApiErrorCode.ERR_INVALID_INPUT, `Please wait ${Math.ceil((60_000 - elapsed) / 1000)} seconds before requesting another code.`);
+    }
+
+    const rawOtp = crypto.randomInt(100000, 1000000).toString();
+    try {
+      await this.deliverMobileActivationOtp(employee.email, employee.name, rawOtp);
+    } catch {
+      await RegistrationOtp.deleteMany({ employeeId: normalizedId });
+      logger.error("Employee registration OTP resend failed", { reason: "SMTP delivery failed" });
+      throw new AppError(503, ApiErrorCode.ERR_INTERNAL_SERVER, "We could not send a verification code. Check SMTP configuration and try again.");
+    }
+    await RegistrationOtp.updateOne({ _id: existing._id }, { $set: { hashedCode: await bcrypt.hash(rawOtp, 10), expiresAt: new Date(Date.now() + env.OTP_EXPIRY_MINUTES * 60_000), attempts: 0, isUsed: false, createdAt: new Date() } });
+    return { employeeId: normalizedId, email: employee.email, expiresInMinutes: env.OTP_EXPIRY_MINUTES, resendAfterSeconds: 60 };
   }
 
   /**
@@ -806,28 +1051,33 @@ export class AuthService {
   /**
    * Registers a new user via corporate email and password.
    * - If an inviteToken is supplied, validates invitation and creates HR or Admin account.
-   * - If no inviteToken, registers a standard EMPLOYEE account requiring email verification.
+   * - Without an inviteToken, starts registration for an existing, active, unlinked employee.
    */
   public async signup(params: {
-    email: string;
+    employeeId?: string;
+    email?: string;
     password: string;
-    name: string;
+    name?: string;
     inviteToken?: string;
   }): Promise<{
     success: boolean;
     message: string;
     requiresEmailVerification: boolean;
-    user: {
+    user?: {
       _id: string;
       email: string;
       employeeId: string;
       role: UserRole;
       status: string;
     };
-    simulatedToken?: string;
+    requiresOtpVerification?: boolean;
+    employeeId?: string;
+    email?: string;
+    maskedEmail?: string;
+    simulatedDemoOtp?: string;
+    demoNotice?: string;
+    expiresInMinutes?: number;
   }> {
-    const cleanEmail = params.email.trim().toLowerCase();
-
     if (!isPasswordStrong(params.password)) {
       throw AppError.badRequest(
         "Password must be at least 8 characters and contain uppercase, lowercase, and a number or symbol.",
@@ -835,139 +1085,278 @@ export class AuthService {
       );
     }
 
-    const existingUser = await User.findOne({ email: cleanEmail });
-    if (existingUser) {
-      throw AppError.conflict(
-        "An account with this email address already exists.",
-        ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
-      );
+    if (!params.inviteToken) {
+      if (!params.employeeId?.trim()) {
+        throw AppError.badRequest("Employee ID is required.", ApiErrorCode.ERR_INVALID_INPUT);
+      }
+
+      const registration = await this.startRegistration(params.employeeId, false);
+      return {
+        success: true,
+        message: registration.isDemoMode
+          ? "Demo verification code generated. Enter the labeled code to complete registration."
+          : "A verification code has been sent to the email address on your employee record.",
+        requiresEmailVerification: false,
+        requiresOtpVerification: true,
+        employeeId: registration.employeeId,
+        email: registration.email,
+        maskedEmail: registration.email.replace(/(?<=.{2}).(?=[^@]*?@)/g, "*"),
+        simulatedDemoOtp: registration.simulatedDemoOtp,
+        demoNotice: registration.isDemoMode
+          ? "SIMULATED OTP FOR DEMO ENVIRONMENT ONLY — NEVER RETURNED IN PRODUCTION"
+          : undefined,
+        expiresInMinutes: registration.expiresInMinutes,
+      };
     }
 
+    const cleanEmail = (params.email || "").trim().toLowerCase();
+    const cleanName = (params.name || "").trim();
+    const requestedEmployeeId = params.employeeId?.trim().toUpperCase();
+
+    const passwordHash = await hashPassword(params.password);
     let role: UserRole = UserRole.EMPLOYEE;
+    // OTP demo mode is unrelated to email verification; open signups always
+    // verify their email before they can sign in.
     let status: "ACTIVE" | "PENDING_VERIFICATION" = "PENDING_VERIFICATION";
     let isEmailVerified = false;
     let department = "General";
     let designation = "Employee";
-    let inviteDoc = null;
-    let verificationToken: string | undefined;
-
-    if (params.inviteToken) {
-      const inviteTokenHash = crypto
-        .createHash("sha256")
-        .update(params.inviteToken.trim())
-        .digest("hex");
-
-      inviteDoc = await StaffInvitation.findOne({
-        tokenHash: inviteTokenHash,
-        isAccepted: false,
-        expiresAt: { $gt: new Date() },
-      });
-
-      if (!inviteDoc) {
-        throw AppError.badRequest(
-          "Invalid or expired staff invitation token.",
-          ApiErrorCode.ERR_TOKEN_EXPIRED
-        );
-      }
-
-      // Invitation grants specific authorized role and auto-activates email
-      role = inviteDoc.role;
-      status = "ACTIVE";
-      isEmailVerified = true;
-      if (inviteDoc.department) department = inviteDoc.department;
-      if (inviteDoc.designation) designation = inviteDoc.designation;
-    }
-
-    // Determine unique Employee ID
-    const count = await User.countDocuments();
-    const empPrefix = role === UserRole.ADMIN ? "ADM" : role === UserRole.HR ? "HR" : "EMP";
-    let candidateId = `${empPrefix}-${(count + 1).toString().padStart(3, "0")}`;
-    while (await User.exists({ employeeId: candidateId })) {
-      candidateId = `${empPrefix}-${Math.floor(1000 + Math.random() * 9000)}`;
-    }
-
-    const passwordHash = await hashPassword(params.password);
-
+    let inviteDoc: IStaffInvitation | null = null;
     let emailVerificationTokenHash: string | null = null;
     let emailVerificationExpiresAt: Date | null = null;
 
+    let user: IUser | null = null;
+    let forceRandomEmployeeId = false;
+    const session = await mongoose.startSession();
+
+    try {
+      let created = false;
+      for (let attempt = 0; attempt < 3 && !created; attempt += 1) {
+        try {
+          await session.withTransaction(async () => {
+            const existingUser = await User.findOne({ email: cleanEmail }).session(session);
+            if (existingUser) {
+              throw AppError.conflict(
+                "An account with this email address already exists.",
+                ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
+              );
+            }
+
+            const existingEmployee = await Employee.findOne({ email: cleanEmail }).session(session);
+            if (existingEmployee) {
+              throw AppError.conflict(
+                "An employee profile with this email already exists. Please sign in or contact HR to link your account.",
+                ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
+              );
+            }
+
+            if (!params.inviteToken && requestedEmployeeId) {
+              const duplicateUserId = await User.exists({ employeeId: requestedEmployeeId }).session(session);
+              const duplicateEmployeeId = await Employee.exists({ employeeId: requestedEmployeeId }).session(session);
+              if (duplicateUserId || duplicateEmployeeId) {
+                throw AppError.conflict(
+                  "This Employee ID is already registered. Please check the ID or contact HR.",
+                  ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
+                );
+              }
+            }
+
+            role = UserRole.EMPLOYEE;
+            status = "PENDING_VERIFICATION";
+            isEmailVerified = false;
+            department = "General";
+            designation = "Employee";
+            inviteDoc = null;
+
+            if (params.inviteToken) {
+              const inviteTokenHash = crypto
+                .createHash("sha256")
+                .update(params.inviteToken.trim())
+                .digest("hex");
+
+              inviteDoc = await StaffInvitation.findOne({
+                tokenHash: inviteTokenHash,
+                isAccepted: false,
+                expiresAt: { $gt: new Date() },
+              }).session(session);
+
+              if (!inviteDoc) {
+                throw AppError.badRequest(
+                  "Invalid or expired staff invitation token.",
+                  ApiErrorCode.ERR_TOKEN_EXPIRED
+                );
+              }
+
+              if (cleanEmail !== inviteDoc.email) {
+                throw AppError.badRequest(
+                  "The signup email does not match the invitation email.",
+                  ApiErrorCode.ERR_INVALID_INPUT
+                );
+              }
+
+              if (inviteDoc.role !== UserRole.HR) {
+                throw AppError.badRequest(
+                  "This invitation is not valid for HR account creation.",
+                  ApiErrorCode.ERR_INVALID_INPUT
+                );
+              }
+
+              role = inviteDoc.role;
+              status = "ACTIVE";
+              isEmailVerified = true;
+              if (inviteDoc.department) department = inviteDoc.department;
+              if (inviteDoc.designation) designation = inviteDoc.designation;
+            }
+
+            const empPrefix = role === UserRole.HR ? "HR" : "EMP";
+            const count = await User.countDocuments().session(session);
+            let candidateId = !params.inviteToken && requestedEmployeeId
+              ? requestedEmployeeId
+              : forceRandomEmployeeId
+                ? `${empPrefix}-${Math.floor(1000 + Math.random() * 9000)}`
+                : `${empPrefix}-${(count + 1).toString().padStart(3, "0")}`;
+            let idAttempts = 0;
+            while (
+              (await User.exists({ employeeId: candidateId }).session(session)) ||
+              (await Employee.exists({ employeeId: candidateId }).session(session))
+            ) {
+              if (!params.inviteToken && requestedEmployeeId) {
+                throw AppError.conflict(
+                  "This Employee ID is already registered. Please check the ID or contact HR.",
+                  ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
+                );
+              }
+              candidateId = `${empPrefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+              idAttempts += 1;
+              if (idAttempts >= 100) {
+                throw AppError.internal("Unable to allocate a unique employee ID.");
+              }
+            }
+
+            emailVerificationTokenHash = null;
+            emailVerificationExpiresAt = null;
+
+            const [createdUser] = await User.create(
+              [
+                {
+                  employeeId: candidateId,
+                  email: cleanEmail,
+                  passwordHash,
+                  role,
+                  status,
+                  isEmailVerified,
+                  emailVerificationTokenHash,
+                  emailVerificationExpiresAt,
+                },
+              ],
+              { session }
+            );
+            user = createdUser;
+
+            await Employee.create(
+              [
+                {
+                  employeeId: candidateId,
+                  name: cleanName,
+                  email: cleanEmail,
+                  department,
+                  designation,
+                  workType: "FULL_TIME",
+                  joiningDate: new Date().toISOString().split("T")[0],
+                  userId: createdUser._id,
+                },
+              ],
+              { session }
+            );
+
+            if (inviteDoc) {
+              inviteDoc.isAccepted = true;
+              inviteDoc.acceptedAt = new Date();
+              await inviteDoc.save({ session });
+
+              await AuditEvent.create(
+                [
+                  {
+                    entityType: "USER",
+                    entityId: createdUser._id.toString(),
+                    performedBy: inviteDoc.invitedBy,
+                    action: "STAFF_INVITATION_ACCEPTED",
+                    reason: `Staff invitation accepted by ${cleanEmail} for role ${role}`,
+                    timestamp: new Date(),
+                    metadata: { role, email: cleanEmail },
+                  },
+                ],
+                { session }
+              );
+            }
+
+            await AuditEvent.create(
+              [
+                {
+                  entityType: "USER",
+                  entityId: createdUser._id.toString(),
+                  performedBy: createdUser._id,
+                  performedByEmployeeId: createdUser.employeeId,
+                  action: "USER_SIGNUP",
+                  reason: `Account registered with role ${role}`,
+                  timestamp: new Date(),
+                  metadata: { role, email: cleanEmail, isEmailVerified },
+                },
+              ],
+              { session }
+            );
+          });
+          created = true;
+        } catch (error) {
+          const duplicateField = getSignupDuplicateField(error);
+          if (duplicateField === "employeeId" && !requestedEmployeeId && attempt < 2) {
+            forceRandomEmployeeId = true;
+            continue;
+          }
+          if (duplicateField) throw getSignupDuplicateError(duplicateField);
+          throw error;
+        }
+      }
+    } finally {
+      await session.endSession();
+    }
+
+    // TypeScript cannot see assignments made inside the transaction callback.
+    const savedUser = user as IUser | null;
+    if (!savedUser) {
+      throw AppError.internal("The account could not be confirmed as saved.");
+    }
+
+    let signupOtp: string | undefined;
     if (!isEmailVerified) {
-      verificationToken = crypto.randomBytes(32).toString("hex");
-      emailVerificationTokenHash = crypto
-        .createHash("sha256")
-        .update(verificationToken)
-        .digest("hex");
-      emailVerificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    }
-
-    const user = await User.create({
-      employeeId: candidateId,
-      email: cleanEmail,
-      passwordHash,
-      role,
-      status,
-      isEmailVerified,
-      emailVerificationTokenHash,
-      emailVerificationExpiresAt,
-    });
-
-    await Employee.create({
-      employeeId: candidateId,
-      name: params.name.trim(),
-      email: cleanEmail,
-      department,
-      designation,
-      workType: "FULL_TIME",
-      joiningDate: new Date().toISOString().split("T")[0],
-      userId: user._id,
-    });
-
-    if (inviteDoc) {
-      inviteDoc.isAccepted = true;
-      inviteDoc.acceptedAt = new Date();
-      await inviteDoc.save();
-
-      await AuditEvent.create({
-        entityType: "USER",
-        entityId: user._id.toString(),
-        performedBy: inviteDoc.invitedBy,
-        action: "STAFF_INVITATION_ACCEPTED",
-        reason: `Staff invitation accepted by ${cleanEmail} for role ${role}`,
-        timestamp: new Date(),
-        metadata: { role, email: cleanEmail },
+      signupOtp = crypto.randomInt(100000, 1000000).toString();
+      const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      await RegistrationOtp.deleteMany({ employeeId: savedUser.employeeId });
+      await RegistrationOtp.create({
+        employeeId: savedUser.employeeId,
+        email: cleanEmail,
+        hashedCode: await bcrypt.hash(signupOtp, 10),
+        expiresAt: otpExpiresAt,
+        attempts: 0,
+        isUsed: false,
       });
-    }
 
-    await AuditEvent.create({
-      entityType: "USER",
-      entityId: user._id.toString(),
-      performedBy: user._id,
-      performedByEmployeeId: user.employeeId,
-      action: "USER_SIGNUP",
-      reason: `Account registered with role ${role}`,
-      timestamp: new Date(),
-      metadata: { role, email: cleanEmail, isEmailVerified },
-    });
-
-    // Send email via mail adapter
-    const mailAdapter = getMailAdapter();
-    const appUrl = env.CORS_ORIGIN.split(",")[0] || "http://localhost:3000";
-
-    if (!isEmailVerified && verificationToken) {
-      const verifyUrl = `${appUrl}/verify-email?token=${verificationToken}`;
-      await mailAdapter.sendMail({
-        to: cleanEmail,
-        subject: "Verify Your VorldX Account",
-        html: `<p>Welcome to VorldX, ${params.name.trim()}!</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
-        text: `Welcome to VorldX, ${params.name.trim()}!\n\nPlease verify your email: ${verifyUrl}\n\nThis link expires in 24 hours.`,
-        meta: {
-          type: "EMAIL_VERIFICATION",
-          token: verificationToken,
-          actionUrl: verifyUrl,
-          recipientName: params.name,
-          role,
-        },
-      });
+      try {
+        await this.deliverSignupOtp(cleanEmail, cleanName, signupOtp);
+      } catch (error) {
+        await RegistrationOtp.deleteMany({ employeeId: savedUser.employeeId });
+        await Employee.deleteOne({ employeeId: savedUser.employeeId });
+        await User.deleteOne({ _id: savedUser._id });
+        await AuditEvent.deleteMany({ entityId: savedUser._id.toString(), action: "USER_SIGNUP" });
+        logger.error("Signup OTP email delivery failed", {
+          reason: error instanceof Error ? error.message : "Unknown mail delivery failure",
+        });
+        throw new AppError(
+          503,
+          ApiErrorCode.ERR_INTERNAL_SERVER,
+          getSignupEmailDeliveryErrorMessage(error)
+        );
+      }
     }
 
     const responsePayload: {
@@ -981,27 +1370,135 @@ export class AuthService {
         role: UserRole;
         status: string;
       };
-      simulatedToken?: string;
+      requiresOtpVerification: boolean;
+      employeeId: string;
     } = {
       success: true,
       message: isEmailVerified
         ? "Account created and activated successfully! You may now sign in."
-        : "Account created! A verification link has been sent to your email.",
+        : "A verification code has been sent to your email address.",
       requiresEmailVerification: !isEmailVerified,
+      requiresOtpVerification: !isEmailVerified,
+      employeeId: savedUser.employeeId,
       user: {
-        _id: user._id.toString(),
-        email: user.email,
-        employeeId: user.employeeId,
-        role: user.role,
-        status: user.status,
+        _id: savedUser._id.toString(),
+        email: savedUser.email,
+        employeeId: savedUser.employeeId,
+        role: savedUser.role,
+        status: savedUser.status,
       },
     };
 
-    if (env.NODE_ENV !== "production" && verificationToken) {
-      responsePayload.simulatedToken = verificationToken;
+    return responsePayload;
+  }
+
+  public async verifySignupOtp(email: string, otp: string): Promise<{ success: boolean; message: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: cleanEmail });
+    if (!user) {
+      throw AppError.badRequest("Invalid email or verification code.", ApiErrorCode.ERR_INVALID_OTP);
+    }
+    if (user.isEmailVerified || user.status === "ACTIVE") {
+      throw AppError.conflict("This account has already been verified.", ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED);
     }
 
-    return responsePayload;
+    const otpRecord = await RegistrationOtp.findOne({ employeeId: user.employeeId, email: cleanEmail });
+    if (!otpRecord || otpRecord.isUsed || otpRecord.expiresAt.getTime() <= Date.now()) {
+      if (otpRecord) await RegistrationOtp.deleteOne({ _id: otpRecord._id });
+      throw AppError.badRequest("Verification code expired. Request a new code.", ApiErrorCode.ERR_OTP_EXPIRED);
+    }
+    if (otpRecord.attempts >= env.OTP_MAX_ATTEMPTS) {
+      await RegistrationOtp.deleteOne({ _id: otpRecord._id });
+      throw AppError.badRequest("Too many attempts. Request a new verification code.", ApiErrorCode.ERR_OTP_ATTEMPTS_EXCEEDED);
+    }
+
+    const matches = await bcrypt.compare(otp.trim(), otpRecord.hashedCode);
+    if (!matches) {
+      const updatedOtp = await RegistrationOtp.findOneAndUpdate(
+        {
+          _id: otpRecord._id,
+          attempts: otpRecord.attempts,
+          isUsed: false,
+          expiresAt: { $gt: new Date() },
+        },
+        { $inc: { attempts: 1 } },
+        { new: true }
+      );
+      if (!updatedOtp) {
+        throw AppError.badRequest(
+          "Verification code changed or expired. Request a new code.",
+          ApiErrorCode.ERR_INVALID_OTP
+        );
+      }
+      if (updatedOtp.attempts >= env.OTP_MAX_ATTEMPTS) {
+        await RegistrationOtp.deleteOne({ _id: otpRecord._id });
+        throw AppError.badRequest("Too many attempts. Request a new verification code.", ApiErrorCode.ERR_OTP_ATTEMPTS_EXCEEDED);
+      }
+      throw AppError.badRequest(`Incorrect code. ${env.OTP_MAX_ATTEMPTS - updatedOtp.attempts} attempt(s) remaining.`, ApiErrorCode.ERR_INVALID_OTP);
+    }
+
+    const consumed = await RegistrationOtp.deleteOne({ _id: otpRecord._id });
+    if (consumed.deletedCount !== 1) {
+      throw AppError.badRequest("This verification code has already been used.", ApiErrorCode.ERR_INVALID_OTP);
+    }
+    user.isEmailVerified = true;
+    user.status = "ACTIVE";
+    user.emailVerificationTokenHash = null;
+    user.emailVerificationExpiresAt = null;
+    await user.save();
+    await AuditEvent.create({
+      entityType: "AUTH",
+      entityId: user._id.toString(),
+      performedBy: user._id,
+      performedByEmployeeId: user.employeeId,
+      action: "EMAIL_OTP_VERIFIED",
+      timestamp: new Date(),
+      metadata: { email: cleanEmail },
+    });
+
+    return { success: true, message: "Email verified successfully. You may now sign in." };
+  }
+
+  public async resendSignupOtp(email: string): Promise<{ success: boolean; message: string; cooldownSeconds: number }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: cleanEmail });
+    if (!user || user.isEmailVerified || user.status !== "PENDING_VERIFICATION") {
+      throw AppError.badRequest("No pending signup verification was found for this email.", ApiErrorCode.ERR_INVALID_INPUT);
+    }
+
+    const existingOtp = await RegistrationOtp.findOne({ employeeId: user.employeeId, email: cleanEmail });
+    const cooldownMs = 60 * 1000;
+    if (existingOtp && Date.now() - existingOtp.createdAt.getTime() < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (Date.now() - existingOtp.createdAt.getTime())) / 1000);
+      throw new AppError(429, ApiErrorCode.ERR_INVALID_INPUT, `Please wait ${remaining} seconds before requesting another code.`);
+    }
+
+    const otp = crypto.randomInt(100000, 1000000).toString();
+    await RegistrationOtp.deleteMany({ employeeId: user.employeeId });
+    await RegistrationOtp.create({
+      employeeId: user.employeeId,
+      email: cleanEmail,
+      hashedCode: await bcrypt.hash(otp, 10),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      attempts: 0,
+      isUsed: false,
+    });
+
+    try {
+      const employee = await Employee.findOne({ employeeId: user.employeeId });
+      await this.deliverSignupOtp(cleanEmail, employee?.name || user.employeeId, otp);
+    } catch (error) {
+      logger.error("Signup OTP resend failed", {
+        reason: error instanceof Error ? error.message : "Unknown mail delivery failure",
+      });
+      throw new AppError(
+        503,
+        ApiErrorCode.ERR_INTERNAL_SERVER,
+        getSignupEmailDeliveryErrorMessage(error)
+      );
+    }
+
+    return { success: true, message: "A new verification code has been sent.", cooldownSeconds: 60 };
   }
 
   /**
@@ -1210,7 +1707,8 @@ export class AuthService {
       name?: string;
       department?: string;
       designation?: string;
-    }
+    },
+    allowExistingInvitation = false
   ): Promise<{
     success: boolean;
     message: string;
@@ -1227,6 +1725,13 @@ export class AuthService {
       );
     }
 
+    if (params.role !== UserRole.HR) {
+      throw AppError.badRequest(
+        "Staff invitations may only create HR accounts.",
+        ApiErrorCode.ERR_INVALID_INPUT
+      );
+    }
+
     const cleanEmail = params.email.trim().toLowerCase();
     const existingUser = await User.findOne({ email: cleanEmail });
     if (existingUser) {
@@ -1236,11 +1741,21 @@ export class AuthService {
       );
     }
 
+    const existingInvitation = await StaffInvitation.findOne({ email: cleanEmail, role: UserRole.HR, isAccepted: false });
+    if (existingInvitation && !allowExistingInvitation) {
+      throw AppError.conflict(
+        "An HR invitation already exists for this email. Use Resend from the HR list to send a fresh link.",
+        ApiErrorCode.ERR_ACCOUNT_ALREADY_REGISTERED
+      );
+    }
+
     const rawToken = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
     const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+    // Fail fast on missing SMTP configuration before writing/replacing an invite.
+    const mailAdapter = getSmtpMailAdapter();
 
-    await StaffInvitation.findOneAndUpdate(
+    const pendingInvitation = await StaffInvitation.findOneAndUpdate(
       { email: cleanEmail },
       {
         email: cleanEmail,
@@ -1256,23 +1771,65 @@ export class AuthService {
       { upsert: true, new: true }
     );
 
-    const mailAdapter = getMailAdapter();
+    // HR invitation and resend use Brevo SMTP through Nodemailer explicitly,
+    // even when the Brevo HTTP API is configured for OTP and other mail flows.
     const appUrl = env.CORS_ORIGIN.split(",")[0] || "http://localhost:3000";
     const inviteUrl = `${appUrl}/signup?invite=${rawToken}`;
 
-    await mailAdapter.sendMail({
-      to: cleanEmail,
-      subject: `Invitation to join VorldX as ${params.role}`,
-      html: `<p>You have been invited by ${admin.email} to join VorldX Workforce Suite as <strong>${params.role}</strong>.</p><p><a href="${inviteUrl}">Click here to accept your invitation and create your account</a></p><p>This invitation link expires in 48 hours.</p>`,
-      text: `You have been invited to join VorldX Workforce Suite as ${params.role}.\n\nAccept your invitation: ${inviteUrl}\n\nThis invitation link expires in 48 hours.`,
-      meta: {
-        type: "STAFF_INVITATION",
-        token: rawToken,
-        actionUrl: inviteUrl,
-        recipientName: params.name,
-        role: params.role,
-      },
-    });
+    try {
+      await mailAdapter.sendMail({
+        to: cleanEmail,
+        subject: `Invitation to join VorldX as ${params.role}`,
+        html: `<p>You have been invited by ${admin.email} to join VorldX Workforce Suite as <strong>${params.role}</strong>.</p><p><a href="${inviteUrl}">Click here to accept your invitation and create your account</a></p><p>This invitation link expires in 48 hours.</p>`,
+        text: `You have been invited to join VorldX Workforce Suite as ${params.role}.\n\nAccept your invitation: ${inviteUrl}\n\nThis invitation link expires in 48 hours.`,
+        meta: {
+          type: "STAFF_INVITATION",
+          token: rawToken,
+          actionUrl: inviteUrl,
+          recipientName: params.name,
+          role: params.role,
+        },
+      });
+    } catch (error: unknown) {
+      const smtpError = error as { code?: unknown; responseCode?: unknown };
+      const isSmtpAuthFailure = smtpError.code === "EAUTH" || smtpError.responseCode === 535;
+      try {
+        if (existingInvitation) {
+          await StaffInvitation.updateOne(
+            { _id: existingInvitation._id, tokenHash },
+            {
+              $set: {
+                tokenHash: existingInvitation.tokenHash,
+                invitedBy: existingInvitation.invitedBy,
+                expiresAt: existingInvitation.expiresAt,
+                isAccepted: existingInvitation.isAccepted,
+                name: existingInvitation.name,
+                department: existingInvitation.department,
+                designation: existingInvitation.designation,
+              },
+            }
+          );
+        } else if (pendingInvitation) {
+          await StaffInvitation.deleteOne({ _id: pendingInvitation._id, tokenHash });
+        }
+      } catch (restoreError: unknown) {
+        const rollbackError = restoreError as { code?: unknown };
+        logger.error("Could not restore the prior HR invitation after SMTP failure", {
+          code: typeof rollbackError.code === "string" ? rollbackError.code : undefined,
+        });
+      }
+      logger.error("HR invitation SMTP delivery failed", {
+        code: typeof smtpError.code === "string" ? smtpError.code : undefined,
+        responseCode: typeof smtpError.responseCode === "number" ? smtpError.responseCode : undefined,
+      });
+      throw new AppError(
+        503,
+        ApiErrorCode.ERR_INTERNAL_SERVER,
+        isSmtpAuthFailure
+          ? "Brevo rejected SMTP authentication. Check SMTP_USER and SMTP_PASS; use the Brevo SMTP login and SMTP key, not the API key, then retry."
+          : "The HR invitation email service is unavailable. Check the SMTP configuration and retry."
+      );
+    }
 
     await AuditEvent.create({
       entityType: "USER",
@@ -1307,6 +1864,196 @@ export class AuthService {
     }
 
     return res;
+  }
+
+  public async listHrManagementRecords(): Promise<Array<{
+    id: string;
+    email: string;
+    name: string;
+    role: UserRole;
+    accountStatus: string;
+    invitationStatus: "Pending" | "Accepted" | "Expired";
+    createdAt: Date;
+    department: string;
+    designation: string;
+  }>> {
+    const [hrUsers, invitations] = await Promise.all([
+      User.find({ role: UserRole.HR }).sort({ createdAt: -1 }).lean(),
+      StaffInvitation.find({ role: UserRole.HR }).sort({ createdAt: -1 }).lean(),
+    ]);
+    const employeeIds = hrUsers.map((user) => user.employeeId);
+    const profiles = await Employee.find({ employeeId: { $in: employeeIds } })
+      .select("employeeId name department designation")
+      .lean();
+    const profileByEmployeeId = new Map(profiles.map((profile) => [profile.employeeId, profile]));
+    const userByEmail = new Map(hrUsers.map((user) => [user.email.toLowerCase(), user]));
+    const records = new Map<string, {
+      id: string;
+      email: string;
+      name: string;
+      role: UserRole;
+      accountStatus: string;
+      invitationStatus: "Pending" | "Accepted" | "Expired";
+      createdAt: Date;
+      department: string;
+      designation: string;
+    }>();
+
+    for (const user of hrUsers) {
+      records.set(user.email.toLowerCase(), {
+        id: user._id.toString(),
+        email: user.email,
+        name: profileByEmployeeId.get(user.employeeId)?.name || user.employeeId,
+        role: UserRole.HR,
+        accountStatus: user.status,
+        invitationStatus: "Accepted",
+        createdAt: user.createdAt,
+        department: profileByEmployeeId.get(user.employeeId)?.department || "",
+        designation: profileByEmployeeId.get(user.employeeId)?.designation || "",
+      });
+    }
+
+    for (const invite of invitations) {
+      const email = invite.email.toLowerCase();
+      if (userByEmail.has(email)) continue;
+      records.set(email, {
+        id: invite._id.toString(),
+        email: invite.email,
+        name: invite.name || invite.email,
+        role: UserRole.HR,
+        accountStatus: "NOT_CREATED",
+        invitationStatus: invite.expiresAt.getTime() <= Date.now() ? "Expired" : "Pending",
+        createdAt: invite.createdAt,
+        department: invite.department || "",
+        designation: invite.designation || "",
+      });
+    }
+
+    return [...records.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  public async resendHrInvitation(adminUserId: string, invitationId: string) {
+    if (!mongoose.Types.ObjectId.isValid(invitationId)) {
+      throw AppError.badRequest("Invalid HR invitation identifier.", ApiErrorCode.ERR_INVALID_INPUT);
+    }
+    const invitation = await StaffInvitation.findOne({
+      _id: invitationId,
+      role: UserRole.HR,
+      isAccepted: false,
+    }).lean();
+    if (!invitation) {
+      throw AppError.notFound("Pending HR invitation was not found.", ApiErrorCode.ERR_NOT_FOUND);
+    }
+    return this.createStaffInvite(adminUserId, {
+      email: invitation.email,
+      role: UserRole.HR,
+      name: invitation.name || undefined,
+      department: invitation.department || undefined,
+      designation: invitation.designation || undefined,
+    }, true);
+  }
+
+  public async setHrAccountStatus(
+    adminUserId: string,
+    hrUserId: string,
+    status: "ACTIVE" | "INACTIVE"
+  ): Promise<{ id: string; status: string }> {
+    const admin = await User.findById(adminUserId);
+    if (!admin || admin.role !== UserRole.ADMIN) {
+      throw AppError.forbidden("Only system administrators can manage HR accounts.", ApiErrorCode.ERR_FORBIDDEN);
+    }
+    if (!mongoose.Types.ObjectId.isValid(hrUserId)) {
+      throw AppError.badRequest("Invalid HR account identifier.", ApiErrorCode.ERR_INVALID_INPUT);
+    }
+    const hrUser = await User.findOneAndUpdate(
+      { _id: hrUserId, role: UserRole.HR },
+      { $set: { status, ...(status === "INACTIVE" ? { refreshTokenHash: null } : {}) } },
+      { new: true }
+    );
+    if (!hrUser) {
+      throw AppError.notFound("HR account was not found.", ApiErrorCode.ERR_NOT_FOUND);
+    }
+    await reauthorizeUserSockets([hrUser._id.toString()]);
+    if (status === "INACTIVE") {
+      await StaffSession.updateMany({ user: hrUser._id, isActive: true }, { $set: { isActive: false } });
+    }
+    await AuditEvent.create({
+      entityType: "USER",
+      entityId: hrUser._id.toString(),
+      performedBy: admin._id,
+      performedByEmployeeId: admin.employeeId,
+      action: status === "INACTIVE" ? "HR_ACCOUNT_DEACTIVATED" : "HR_ACCOUNT_REACTIVATED",
+      timestamp: new Date(),
+      metadata: { targetUserId: hrUser._id.toString(), status },
+    });
+    return { id: hrUser._id.toString(), status: hrUser.status };
+  }
+
+  public async updateHrManagementRecord(
+    adminUserId: string,
+    recordId: string,
+    details: { name: string; department: string; designation: string }
+  ): Promise<{ id: string }> {
+    const admin = await User.findById(adminUserId);
+    if (!admin || admin.role !== UserRole.ADMIN) {
+      throw AppError.forbidden("Only system administrators can manage HR accounts.", ApiErrorCode.ERR_FORBIDDEN);
+    }
+    if (!mongoose.Types.ObjectId.isValid(recordId)) {
+      throw AppError.badRequest("Invalid HR record identifier.", ApiErrorCode.ERR_INVALID_INPUT);
+    }
+
+    const invitation = await StaffInvitation.findOne({ _id: recordId, role: UserRole.HR, isAccepted: false });
+    if (invitation) {
+      invitation.name = details.name.trim();
+      invitation.department = details.department.trim();
+      invitation.designation = details.designation.trim();
+      await invitation.save();
+      return { id: invitation._id.toString() };
+    }
+
+    const hrUser = await User.findOne({ _id: recordId, role: UserRole.HR });
+    if (!hrUser) throw AppError.notFound("HR account or invitation was not found.", ApiErrorCode.ERR_NOT_FOUND);
+    const profile = await Employee.findOne({ employeeId: hrUser.employeeId });
+    if (!profile) throw AppError.notFound("HR employee profile was not found.", ApiErrorCode.ERR_NOT_FOUND);
+    profile.name = details.name.trim();
+    profile.department = details.department.trim();
+    profile.designation = details.designation.trim();
+    await profile.save();
+    return { id: hrUser._id.toString() };
+  }
+
+  public async deleteHrManagementRecord(adminUserId: string, recordId: string): Promise<{ id: string }> {
+    const admin = await User.findById(adminUserId);
+    if (!admin || admin.role !== UserRole.ADMIN) {
+      throw AppError.forbidden("Only system administrators can manage HR accounts.", ApiErrorCode.ERR_FORBIDDEN);
+    }
+    if (!mongoose.Types.ObjectId.isValid(recordId)) {
+      throw AppError.badRequest("Invalid HR record identifier.", ApiErrorCode.ERR_INVALID_INPUT);
+    }
+
+    const invitation = await StaffInvitation.findOneAndDelete({ _id: recordId, role: UserRole.HR, isAccepted: false });
+    if (invitation) return { id: invitation._id.toString() };
+
+    const hrUser = await User.findOne({ _id: recordId, role: UserRole.HR });
+    if (!hrUser) throw AppError.notFound("HR account or invitation was not found.", ApiErrorCode.ERR_NOT_FOUND);
+
+    await StaffSession.updateMany({ user: hrUser._id, isActive: true }, { $set: { isActive: false } });
+    await Employee.updateOne(
+      { employeeId: hrUser.employeeId, userId: hrUser._id },
+      { $set: { userId: null, isActive: false } }
+    );
+    await StaffInvitation.deleteMany({ email: hrUser.email, role: UserRole.HR });
+    await User.deleteOne({ _id: hrUser._id, role: UserRole.HR });
+    await AuditEvent.create({
+      entityType: "USER",
+      entityId: hrUser._id.toString(),
+      performedBy: admin._id,
+      performedByEmployeeId: admin.employeeId,
+      action: "HR_ACCOUNT_DELETED",
+      timestamp: new Date(),
+      metadata: { targetEmail: hrUser.email, employeeId: hrUser.employeeId },
+    });
+    return { id: hrUser._id.toString() };
   }
 
   /**

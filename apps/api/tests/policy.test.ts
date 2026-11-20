@@ -103,6 +103,25 @@ describe("Attendance Policy & Holiday Module", () => {
     expect(res.body.code).toBe(ApiErrorCode.ERR_FORBIDDEN);
   });
 
+  it("rejects invalid IANA timezones without changing the stored policy", async () => {
+    const initial = await request(app)
+      .get("/api/policy")
+      .set("Authorization", `Bearer ${hrToken}`);
+    const originalVersion = initial.body.data.version;
+
+    const res = await request(app)
+      .patch("/api/policy")
+      .set("Authorization", `Bearer ${hrToken}`)
+      .send({ timezone: "Not/A_Real_Timezone" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe(ApiErrorCode.ERR_INVALID_INPUT);
+
+    const storedPolicy = await AttendancePolicy.findOne({ isDefault: true });
+    expect(storedPolicy?.timezone).toBe("Asia/Kolkata");
+    expect(storedPolicy?.version).toBe(originalVersion);
+  });
+
   it("updates policy, increments version, validates shift rules, and logs AuditEvent", async () => {
     // 1. Initial version is 1
     const initialPolicy = await request(app)
@@ -128,6 +147,19 @@ describe("Attendance Policy & Holiday Module", () => {
     expect(invalidShiftRes.status).toBe(400);
     expect(invalidShiftRes.body.code).toBe(ApiErrorCode.ERR_INVALID_INPUT);
     expect(invalidShiftRes.body.message).toContain("must be after start time");
+
+    const overlappingShiftRes = await request(app)
+      .patch("/api/policy")
+      .set("Authorization", `Bearer ${hrToken}`)
+      .send({
+        shifts: [
+          { name: "Day Shift A", startTime: "09:00", endTime: "17:00", isActive: true },
+          { name: "Day Shift B", startTime: "16:00", endTime: "20:00", isActive: true },
+        ],
+      });
+    expect(overlappingShiftRes.status).toBe(400);
+    expect(overlappingShiftRes.body.code).toBe(ApiErrorCode.ERR_INVALID_INPUT);
+    expect(overlappingShiftRes.body.message).toContain("overlapping hours");
 
     // 3. Reject grace period > 60 minutes
     const invalidGraceRes = await request(app)

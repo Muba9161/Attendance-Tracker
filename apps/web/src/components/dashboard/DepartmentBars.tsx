@@ -23,10 +23,10 @@ export const DepartmentBars: React.FC<DepartmentBarsProps> = ({
   });
 
   return (
-    <Card className="p-4 sm:p-5 flex flex-col justify-between h-full">
+    <Card className="department-performance-card p-4 sm:p-5 flex flex-col justify-between h-full">
       {/* Header */}
       <div>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div className="department-performance-header flex flex-col items-stretch gap-3 mb-4">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/60">
               <Building2 className="w-5 h-5" />
@@ -42,20 +42,20 @@ export const DepartmentBars: React.FC<DepartmentBarsProps> = ({
           </div>
 
           {/* Sort Selector */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-slate-400 flex items-center gap-1 mr-1">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs min-w-0">
+            <span className="text-slate-400 flex items-center gap-1 mr-1 whitespace-nowrap">
               <ArrowUpDown className="w-3 h-3" />
               Sort:
             </span>
             <div
               role="group"
               aria-label="Sort departments by metric"
-              className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-slate-200/80 dark:border-slate-700/80"
+              className="flex flex-wrap items-center p-0.5 bg-slate-100 dark:bg-slate-800/80 rounded-lg border border-slate-200/80 dark:border-slate-700/80"
             >
               <button
                 type="button"
                 onClick={() => setSortBy("rate")}
-                className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
                   sortBy === "rate"
                     ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-xs"
                     : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -67,7 +67,7 @@ export const DepartmentBars: React.FC<DepartmentBarsProps> = ({
               <button
                 type="button"
                 onClick={() => setSortBy("headcount")}
-                className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
                   sortBy === "headcount"
                     ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-xs"
                     : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
@@ -79,7 +79,7 @@ export const DepartmentBars: React.FC<DepartmentBarsProps> = ({
               <button
                 type="button"
                 onClick={() => setSortBy("name")}
-                className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
                   sortBy === "name"
                     ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-xs"
                     : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"

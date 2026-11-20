@@ -5,9 +5,10 @@ import { UserRole } from "@vorldx/shared";
 
 export interface RoleGuardProps {
   allowedRoles: string[];
+  allowAdminBypass?: boolean;
 }
 
-export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
+export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles, allowAdminBypass = true }) => {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
@@ -19,7 +20,7 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
   }
 
   // Superuser admin bypass
-  if (user.role === UserRole.ADMIN || user.role === "ADMIN") {
+  if (allowAdminBypass && (user.role === UserRole.ADMIN || user.role === "ADMIN")) {
     return <Outlet />;
   }
 

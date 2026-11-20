@@ -3,6 +3,7 @@ import { StyleSheet, View, TouchableOpacity } from 'react-native';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { colors, fonts, spacing, tones, type Tone } from '../../theme/tokens';
 import { useResponsive } from '../../lib/responsive';
+import { getLocalDateKey } from '../../lib/date';
 import { PressableScale } from './PressableScale';
 import { Text } from './Text';
 
@@ -74,7 +75,7 @@ export function Calendar({
   };
 
   const monthLabel = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateKey();
 
   return (
     <View style={styles.container}>

@@ -9,6 +9,8 @@ export interface IQrToken extends Document {
   issuedAt: Date;
   expiresAt: Date;
   isRevoked: boolean;
+  consumedAt?: Date | null;
+  reservationId?: string | null;
   createdAt: Date;
 }
 
@@ -52,6 +54,14 @@ const QrTokenSchema = new Schema<IQrToken>(
       required: true,
       default: false,
       index: true,
+    },
+    consumedAt: {
+      type: Date,
+      default: null,
+    },
+    reservationId: {
+      type: String,
+      default: null,
     },
     createdAt: {
       type: Date,

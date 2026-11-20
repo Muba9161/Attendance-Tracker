@@ -19,7 +19,7 @@ Cross-platform employee mobile application built with **Expo (SDK 52)**, **TypeS
 
 3. **Employee Self-Registration & Authentication Flows**:
    - **Step 1 (Register)**: Validates Employee ID against company directory with instant error feedback (`ERR_EMPLOYEE_NOT_FOUND`, `ERR_ACCOUNT_ALREADY_REGISTERED`, `ERR_EMPLOYEE_INACTIVE`).
-   - **Step 2 (Simulated OTP)**: Prominently labeled **DEMO VERIFICATION MODE** callout showing simulated 6-digit OTP code with "Auto-Fill Demo Code" action; enforces 3-attempt limit and expiry handling (`ERR_INVALID_OTP`, `ERR_OTP_EXPIRED`).
+   - **Step 2 (Email OTP)**: Enters the six-digit code sent to the registered employee email, with resend cooldown, attempt limit, and expiry handling (`ERR_INVALID_OTP`, `ERR_OTP_EXPIRED`).
    - **Step 3 (Set Password)**: Enforces minimum 8-character password with confirm password check and verification token validation.
    - **Home Profile**: Authenticated employee dashboard with verified badges, department details, and quick attendance/WFH cards.
    - **Sign In / Out**: Full login with error handling (`ERR_INVALID_CREDENTIALS`, `ERR_ACCOUNT_LOCKED`), quick-fill demo account helper, session expired detection, and clean sign out.
@@ -88,9 +88,9 @@ npx tsx apps/mobile/scripts/verify-mobile.ts
   - Emulated iPhone/Android mobile viewport (`390x844`, 2x scale, touch-enabled) via headless Chrome against a live API on port 4000 and in-memory MongoDB.
   - Welcome screen rendering and brand tokens (`browser_43_mobile_welcome.png`).
   - Employee ID validation with specific error displays for `EMP-999` (not found) and `EMP-001` (already registered) (`browser_44_mobile_register_error.png`).
-  - Step 2 OTP verification screen displaying the "DEMO VERIFICATION MODE" banner with simulated OTP (`browser_45_mobile_verify_otp.png`).
+  - Step 2 OTP verification screen for the registered employee email (`browser_45_mobile_verify_otp.png`).
   - Invalid OTP rejection (`000000`) showing `ERR_INVALID_OTP` error alert.
-  - Auto-fill demo OTP code and transition to password creation (`browser_46_mobile_set_password.png`).
+  - Enter the emailed OTP and transition to password creation (`browser_46_mobile_set_password.png`).
   - Minimum 8-character password creation and completion of registration with backend account activation.
   - Authenticated dashboard (`/home`) showing user profile ("Rohan Verma"), badges ("EMPLOYEE", "ACCOUNT VERIFIED"), and punch cards (`browser_47_mobile_home_profile.png`).
   - Safe sign-out returning to Welcome screen.

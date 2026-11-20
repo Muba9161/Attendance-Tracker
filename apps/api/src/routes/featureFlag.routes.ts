@@ -12,7 +12,7 @@ router.get("/feature-flags", featureFlagController.getFlags);
 router.get(
   "/admin/feature-flags",
   authenticate,
-  requireRole(UserRole.ADMIN, UserRole.HR),
+  requireRole(UserRole.ADMIN),
   featureFlagController.getFlagsDetailed
 );
 

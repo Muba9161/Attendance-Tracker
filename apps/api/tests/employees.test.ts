@@ -236,6 +236,61 @@ describe("Employees Management Module (HR/Admin)", () => {
     );
   });
 
+  it("keeps the linked login identity and self-profile lookup synchronized when employee ID or email changes", async () => {
+    const newEmployeeId = "EMP-902";
+    const newEmail = "updated.emp901@vorldx.demo";
+
+    const updateRes = await request(app)
+      .patch(`/api/employees/${testEmployeeId}`)
+      .set("Authorization", `Bearer ${hrToken}`)
+      .send({ employeeId: newEmployeeId, email: newEmail });
+
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.data.employeeId).toBe(newEmployeeId);
+    expect(updateRes.body.data.email).toBe(newEmail);
+
+    const linkedUser = await User.findById(updateRes.body.data.userId._id);
+    expect(linkedUser?.employeeId).toBe(newEmployeeId);
+    expect(linkedUser?.email).toBe(newEmail);
+    expect(linkedUser?.passwordHash).toBe("hashedPassword");
+
+    const profileRes = await request(app)
+      .get("/api/employees/me")
+      .set("Authorization", `Bearer ${employeeToken}`);
+
+    expect(profileRes.status).toBe(200);
+    expect(profileRes.body.data.employeeId).toBe(newEmployeeId);
+    expect(profileRes.body.data.email).toBe(newEmail);
+    expect(profileRes.body.data.userId.passwordHash).toBeUndefined();
+  });
+
+  it("rejects an employee email that is already assigned to another user account", async () => {
+    const res = await request(app)
+      .patch(`/api/employees/${testEmployeeId}`)
+      .set("Authorization", `Bearer ${hrToken}`)
+      .send({ email: "admin@vorldx.demo" });
+
+    expect(res.status).toBe(409);
+    expect(await Employee.findOne({ employeeId: testEmployeeId }).then((employee) => employee?.email)).toBe(
+      "emp901@vorldx.demo"
+    );
+    expect(await User.findOne({ employeeId: testEmployeeId }).then((user) => user?.email)).toBe(
+      "emp901@vorldx.demo"
+    );
+  });
+
+  it("rejects a malformed shift ID without changing the employee record", async () => {
+    const res = await request(app)
+      .patch(`/api/employees/${testEmployeeId}`)
+      .set("Authorization", `Bearer ${hrToken}`)
+      .send({ department: "Changed Department", shiftId: "not-a-shift-id" });
+
+    expect(res.status).toBe(400);
+    expect(await Employee.findOne({ employeeId: testEmployeeId }).then((employee) => employee?.department)).toBe(
+      "Engineering"
+    );
+  });
+
   it("deactivates employee, blocks login, revokes refresh tokens, and writes AuditEvent", async () => {
     // 1. Deactivate employee
     const deactRes = await request(app)
@@ -385,6 +440,14 @@ describe("Employees Management Module (HR/Admin)", () => {
     expect(workTypeRes.status).toBe(200);
     expect(workTypeRes.body.data.length).toBe(1);
     expect(workTypeRes.body.data[0].employeeId).toBe("EMP-A02");
+
+    const designationRes = await request(app)
+      .get("/api/employees?designation=Brand%20Strategist")
+      .set("Authorization", `Bearer ${adminToken}`);
+
+    expect(designationRes.status).toBe(200);
+    expect(designationRes.body.data).toHaveLength(1);
+    expect(designationRes.body.data[0].employeeId).toBe("EMP-A01");
 
     // 6. Sorting: name asc
     const sortRes = await request(app)

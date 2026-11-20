@@ -46,6 +46,8 @@ const variantStyles: Record<TextVariant, TextStyle> = {
   numberSmall: { fontFamily: fonts.semibold, fontSize: 20, lineHeight: 24, letterSpacing: -0.4 },
 };
 
+const nonEditableTextCursor = { cursor: 'default' } as TextStyle & { cursor: 'default' };
+
 export function Text({
   variant = 'body',
   color = colors.text,
@@ -57,10 +59,12 @@ export function Text({
   return (
     <RNText
       {...props}
+      selectable={false}
       style={[
         variantStyles[variant],
         weight ? { fontFamily: fonts[weight] } : null,
         { color },
+        nonEditableTextCursor,
         align ? { textAlign: align } : null,
         style,
       ]}

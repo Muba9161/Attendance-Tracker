@@ -46,6 +46,7 @@ import { Modal } from "../components/ui/Modal";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import { WorkType, AttendanceStatus } from "@vorldx/shared";
 
@@ -71,17 +72,6 @@ const employeeFormSchema = z.object({
 
 type EmployeeFormData = z.infer<typeof employeeFormSchema>;
 
-const DEPARTMENTS = [
-  "Engineering",
-  "Product",
-  "Operations",
-  "Marketing",
-  "HR",
-  "Executive",
-  "Finance",
-  "Design",
-];
-
 export const EmployeesPage: React.FC = () => {
   const navigate = useNavigate();
   const { success, error } = useToast();
@@ -92,6 +82,7 @@ export const EmployeesPage: React.FC = () => {
     limit: 10,
     search: "",
     department: "",
+    designation: "",
     status: "",
     workType: "",
     sortBy: "createdAt",
@@ -114,7 +105,7 @@ export const EmployeesPage: React.FC = () => {
   const [duplicateIdError, setDuplicateIdError] = useState<string | null>(null);
 
   // 4. Data Queries & Mutations
-  const { data: employeeData, isLoading, isFetching, refetch } = useEmployees(filters);
+  const { data: employeeData, isLoading, isFetching, isError, error: employeeError, refetch } = useEmployees(filters);
   const { data: policyData } = useActivePolicy();
   const createMutation = useCreateEmployee();
   const updateMutation = useUpdateEmployee();
@@ -160,7 +151,7 @@ export const EmployeesPage: React.FC = () => {
   const pagination = employeeData?.pagination;
   const employees = employeeData?.data || [];
   const isFiltered = Boolean(
-    filters.search || filters.department || filters.status || filters.workType
+    filters.search || filters.department || filters.designation || filters.status || filters.workType
   );
 
   // Row Selection Helpers
@@ -357,6 +348,7 @@ export const EmployeesPage: React.FC = () => {
       limit: 10,
       search: "",
       department: "",
+      designation: "",
       status: "",
       workType: "",
       sortBy: "createdAt",
@@ -474,21 +466,30 @@ export const EmployeesPage: React.FC = () => {
 
           {/* Department Filter */}
           <div>
-            <select
+            <input
+              type="text"
               value={filters.department || ""}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, department: e.target.value, page: 1 }))
               }
+              placeholder="Filter by department"
               aria-label="Filter by department"
               className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-            >
-              <option value="">All Departments</option>
-              {DEPARTMENTS.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept}
-                </option>
-              ))}
-            </select>
+            />
+          </div>
+
+          {/* Designation Filter */}
+          <div>
+            <input
+              type="text"
+              value={filters.designation || ""}
+              onChange={(e) =>
+                setFilters((prev) => ({ ...prev, designation: e.target.value, page: 1 }))
+              }
+              placeholder="Filter by designation"
+              aria-label="Filter by designation"
+              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            />
           </div>
 
           {/* Status Filter */}
@@ -539,6 +540,12 @@ export const EmployeesPage: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {isError && employeeData && (
+        <ErrorState title="Employee list refresh failed"
+          message={employeeError instanceof Error ? employeeError.message : "Showing the last successfully loaded employees."}
+          onRetry={() => void refetch()} isRetrying={isFetching} className="p-4" />
+      )}
 
       {/* Employees Table Card */}
       <Card className="border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs bg-white dark:bg-slate-900">
@@ -655,6 +662,10 @@ export const EmployeesPage: React.FC = () => {
                     </td>
                   </tr>
                 ))
+              ) : isError && !employeeData ? (
+                <tr><td colSpan={8} className="px-6 py-8"><ErrorState title="Unable to load employees"
+                  message={employeeError instanceof Error ? employeeError.message : "The employee request failed."}
+                  onRetry={() => void refetch()} isRetrying={isFetching} /></td></tr>
               ) : employees.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-6 py-12 text-center">
@@ -913,6 +924,7 @@ export const EmployeesPage: React.FC = () => {
             : "Register a new corporate employee into the workforce directory."
         }
         width="lg"
+        presentation="modal"
         footer={
           <>
             <Button
@@ -926,8 +938,8 @@ export const EmployeesPage: React.FC = () => {
             <Button
               variant="primary"
               size="md"
-              type="button"
-              onClick={handleSubmit(onSubmitForm)}
+              type="submit"
+              form="employee-form"
               isLoading={isSubmitting || createMutation.isPending || updateMutation.isPending}
             >
               {editingEmployee ? "Save Changes" : "Create Employee"}
@@ -935,7 +947,7 @@ export const EmployeesPage: React.FC = () => {
           </>
         }
       >
-        <form onSubmit={handleSubmit(onSubmitForm)} className="space-y-4">
+        <form id="employee-form" onSubmit={handleSubmit(onSubmitForm)} className="space-y-4">
           {duplicateIdError && (
             <div className="p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-xl flex items-start gap-2.5 text-rose-900 dark:text-rose-200 text-xs">
               <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
@@ -982,17 +994,12 @@ export const EmployeesPage: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Select
+              <Input
                 label="Department"
+                placeholder="e.g. Engineering"
                 error={errors.department?.message}
                 {...register("department")}
-              >
-                {DEPARTMENTS.map((dept) => (
-                  <option key={dept} value={dept}>
-                    {dept}
-                  </option>
-                ))}
-              </Select>
+              />
             </div>
 
             <div>

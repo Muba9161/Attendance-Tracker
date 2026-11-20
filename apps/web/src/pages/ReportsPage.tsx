@@ -15,6 +15,7 @@ import { Select } from "../components/ui/Select";
 import { Badge } from "../components/ui/Badge";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ErrorState } from "../components/ui/ErrorState";
 import { useToast } from "../components/ui/Toast";
 import {
   ResponsiveContainer,
@@ -37,15 +38,6 @@ import {
   BarChart3,
   TrendingUp,
 } from "lucide-react";
-
-const DEPARTMENT_OPTIONS = [
-  { value: "", label: "All Departments" },
-  { value: "Engineering", label: "Engineering" },
-  { value: "Product", label: "Product" },
-  { value: "Operations", label: "Operations" },
-  { value: "Marketing", label: "Marketing" },
-  { value: "HR", label: "HR" },
-];
 
 type ReportTab = "summary" | "employee" | "department" | "late" | "wfh";
 
@@ -76,24 +68,30 @@ export const ReportsPage: React.FC = () => {
   };
 
   // Queries for each tab
-  const { data: summaryData, isLoading: isSummaryLoading } = useAttendanceSummaryReport(
-    activeTab === "summary" ? filterParams : { page: 1, limit: 1 }
+  const { data: summaryData, isLoading: isSummaryLoading, isError: isSummaryError, error: summaryError, refetch: refetchSummary, isFetching: isSummaryFetching } = useAttendanceSummaryReport(
+    filterParams,
+    activeTab === "summary"
   );
 
-  const { data: employeeData, isLoading: isEmployeeLoading } = useEmployeeWiseReport(
-    activeTab === "employee" ? filterParams : { page: 1, limit: 1 }
+  const { data: employeeData, isLoading: isEmployeeLoading, isError: isEmployeeError, error: employeeError, refetch: refetchEmployee, isFetching: isEmployeeFetching } = useEmployeeWiseReport(
+    filterParams,
+    activeTab === "employee"
   );
 
-  const { data: departmentData, isLoading: isDeptLoading } = useDepartmentWiseReport(
-    activeTab === "department" ? filterParams : { page: 1, limit: 1 }
+  const { data: departmentData, isLoading: isDeptLoading, isError: isDeptError, error: deptError, refetch: refetchDept, isFetching: isDeptFetching } = useDepartmentWiseReport(
+    filterParams,
+    activeTab === "department"
+  );
+  const { data: allDepartmentData, isError: isAllDepartmentsError, error: allDepartmentsError, refetch: refetchAllDepartments, isFetching: isAllDepartmentsFetching } = useDepartmentWiseReport({ page: 1, limit: 500 });
+
+  const { data: lateData, isLoading: isLateLoading, isError: isLateError, error: lateError, refetch: refetchLate, isFetching: isLateFetching } = useLateReport(
+    filterParams,
+    activeTab === "late"
   );
 
-  const { data: lateData, isLoading: isLateLoading } = useLateReport(
-    activeTab === "late" ? filterParams : { page: 1, limit: 1 }
-  );
-
-  const { data: wfhData, isLoading: isWfhLoading } = useWfhReport(
-    activeTab === "wfh" ? filterParams : { page: 1, limit: 1 }
+  const { data: wfhData, isLoading: isWfhLoading, isError: isWfhError, error: wfhError, refetch: refetchWfh, isFetching: isWfhFetching } = useWfhReport(
+    filterParams,
+    activeTab === "wfh"
   );
 
   const handleExportCsv = async () => {
@@ -141,18 +139,58 @@ export const ReportsPage: React.FC = () => {
   };
 
   const summary = summaryData?.summary;
+  const departmentOptions = [
+    { value: "", label: "All Departments" },
+    ...Array.from(new Set((allDepartmentData?.data || []).map((item) => item.department)))
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ value, label: value })),
+  ];
   const summaryChartData = summary
     ? [
         { name: "Present", count: summary.presentCount, fill: "#22c55e" },
         { name: "Late", count: summary.lateCount, fill: "#f59e0b" },
         { name: "WFH", count: summary.wfhCount, fill: "#3b82f6" },
-        { name: "Half Day", count: summary.halfDayCount, fill: "#8b5cf6" },
+        { name: "Half Day", count: summary.halfDayCount, fill: "#32BDA8" },
         { name: "Absent", count: summary.absentCount, fill: "#ef4444" },
       ]
     : [];
 
   return (
     <div className="space-y-6">
+      {isAllDepartmentsError && (
+        <ErrorState
+          title="Department options could not be refreshed"
+          message={allDepartmentsError instanceof Error ? allDepartmentsError.message : "The report filter request failed."}
+          onRetry={() => void refetchAllDepartments()}
+          isRetrying={isAllDepartmentsFetching}
+          className="p-4"
+        />
+      )}
+      {activeTab === "summary" && isSummaryError && summaryData && (
+        <ErrorState title="Attendance summary refresh failed"
+          message={summaryError instanceof Error ? summaryError.message : "Showing the last successful report data."}
+          onRetry={() => void refetchSummary()} isRetrying={isSummaryFetching} className="p-4" />
+      )}
+      {activeTab === "employee" && isEmployeeError && employeeData && (
+        <ErrorState title="Employee report refresh failed"
+          message={employeeError instanceof Error ? employeeError.message : "Showing the last successful report data."}
+          onRetry={() => void refetchEmployee()} isRetrying={isEmployeeFetching} className="p-4" />
+      )}
+      {activeTab === "department" && isDeptError && departmentData && (
+        <ErrorState title="Department report refresh failed"
+          message={deptError instanceof Error ? deptError.message : "Showing the last successful report data."}
+          onRetry={() => void refetchDept()} isRetrying={isDeptFetching} className="p-4" />
+      )}
+      {activeTab === "late" && isLateError && lateData && (
+        <ErrorState title="Late report refresh failed"
+          message={lateError instanceof Error ? lateError.message : "Showing the last successful report data."}
+          onRetry={() => void refetchLate()} isRetrying={isLateFetching} className="p-4" />
+      )}
+      {activeTab === "wfh" && isWfhError && wfhData && (
+        <ErrorState title="WFH report refresh failed"
+          message={wfhError instanceof Error ? wfhError.message : "Showing the last successful report data."}
+          onRetry={() => void refetchWfh()} isRetrying={isWfhFetching} className="p-4" />
+      )}
       {/* Top Header & Actions (hidden on print) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800 print:hidden">
         <div>
@@ -253,7 +291,7 @@ export const ReportsPage: React.FC = () => {
                 setPage(1);
               }}
               aria-label="Filter report by department"
-              options={DEPARTMENT_OPTIONS}
+              options={departmentOptions}
               className="text-xs"
             />
           </div>
@@ -442,6 +480,10 @@ export const ReportsPage: React.FC = () => {
             <div className="h-64 w-full pt-2">
               {isSummaryLoading ? (
                 <Skeleton className="h-full w-full" />
+              ) : isSummaryError && !summaryData ? (
+                <ErrorState title="Unable to load attendance chart"
+                  message={summaryError instanceof Error ? summaryError.message : "The report request failed."}
+                  onRetry={() => void refetchSummary()} isRetrying={isSummaryFetching} />
               ) : summaryChartData.length === 0 ? (
                 <EmptyState
                   icon={<BarChart3 className="w-6 h-6 text-slate-400" />}
@@ -481,6 +523,10 @@ export const ReportsPage: React.FC = () => {
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
               </div>
+            ) : isSummaryError && !summaryData ? (
+              <ErrorState title="Unable to load attendance records"
+                message={summaryError instanceof Error ? summaryError.message : "The report request failed."}
+                onRetry={() => void refetchSummary()} isRetrying={isSummaryFetching} />
             ) : (summaryData?.data || []).length === 0 ? (
               <EmptyState
                 icon={<Calendar className="w-6 h-6 text-slate-400" />}
@@ -562,6 +608,10 @@ export const ReportsPage: React.FC = () => {
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
             </div>
+          ) : isEmployeeError && !employeeData ? (
+            <ErrorState title="Unable to load employee report"
+              message={employeeError instanceof Error ? employeeError.message : "The report request failed."}
+              onRetry={() => void refetchEmployee()} isRetrying={isEmployeeFetching} />
           ) : (employeeData?.data || []).length === 0 ? (
             <EmptyState
               icon={<Users className="w-6 h-6 text-slate-400" />}
@@ -633,6 +683,10 @@ export const ReportsPage: React.FC = () => {
             <div className="h-64 w-full pt-2">
               {isDeptLoading ? (
                 <Skeleton className="h-full w-full" />
+              ) : isDeptError && !departmentData ? (
+                <ErrorState title="Unable to load department report"
+                  message={deptError instanceof Error ? deptError.message : "The report request failed."}
+                  onRetry={() => void refetchDept()} isRetrying={isDeptFetching} />
               ) : (departmentData?.data || []).length === 0 ? (
                 <EmptyState
                   icon={<Building className="w-6 h-6 text-slate-400" />}
@@ -721,6 +775,10 @@ export const ReportsPage: React.FC = () => {
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
             </div>
+          ) : isLateError && !lateData ? (
+            <ErrorState title="Unable to load late-arrivals report"
+              message={lateError instanceof Error ? lateError.message : "The report request failed."}
+              onRetry={() => void refetchLate()} isRetrying={isLateFetching} />
           ) : (lateData?.data || []).length === 0 ? (
             <EmptyState
               icon={<Clock className="w-6 h-6 text-slate-400" />}
@@ -781,6 +839,10 @@ export const ReportsPage: React.FC = () => {
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
             </div>
+          ) : isWfhError && !wfhData ? (
+            <ErrorState title="Unable to load WFH report"
+              message={wfhError instanceof Error ? wfhError.message : "The report request failed."}
+              onRetry={() => void refetchWfh()} isRetrying={isWfhFetching} />
           ) : (wfhData?.data || []).length === 0 ? (
             <EmptyState
               icon={<Home className="w-6 h-6 text-slate-400" />}

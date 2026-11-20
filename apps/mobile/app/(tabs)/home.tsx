@@ -97,6 +97,8 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [todayData, setTodayData] = useState<TodayAttendanceResponse | null>(null);
   const [historyData, setHistoryData] = useState<AttendanceHistoryResponse | null>(null);
+  const [todayLoadFailed, setTodayLoadFailed] = useState(false);
+  const [historyLoadFailed, setHistoryLoadFailed] = useState(false);
   const [topAnnouncement, setTopAnnouncement] = useState<MobileAnnouncementItem | null>(null);
   const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState<number>(0);
 
@@ -109,8 +111,14 @@ export default function HomeScreen() {
         announcementsApi.getUnreadCount(),
       ]);
 
-      if (todayRes.status === 'fulfilled') setTodayData(todayRes.value);
-      if (historyRes.status === 'fulfilled') setHistoryData(historyRes.value);
+      if (todayRes.status === 'fulfilled' && todayRes.value?.success) {
+        setTodayData(todayRes.value);
+        setTodayLoadFailed(false);
+      } else setTodayLoadFailed(true);
+      if (historyRes.status === 'fulfilled' && historyRes.value?.success) {
+        setHistoryData(historyRes.value);
+        setHistoryLoadFailed(false);
+      } else setHistoryLoadFailed(true);
       if (announceRes.status === 'fulfilled' && announceRes.value?.success && announceRes.value?.data?.length > 0) {
         setTopAnnouncement(announceRes.value.data[0]);
       }
@@ -161,7 +169,9 @@ export default function HomeScreen() {
       ? 'Punched In'
       : isCheckedOut
         ? 'Punched Out'
-        : 'Not Checked In';
+        : todayLoadFailed && !todayData
+          ? 'Unavailable'
+          : 'Not Checked In';
 
   const punchStatusTone = isWfhToday
     ? 'leave'
@@ -212,6 +222,20 @@ export default function HomeScreen() {
         />
       }
     >
+      {todayLoadFailed || historyLoadFailed ? (
+        <Card variant="glass" padding={12} style={{ marginBottom: spacing.md }}>
+          <Text variant="small" color={colors.warning}>
+            {todayLoadFailed && !todayData ? "Today's attendance could not be loaded. " : ''}
+            {historyLoadFailed && !historyData ? 'Monthly attendance could not be loaded. ' : ''}
+            {(todayLoadFailed && todayData) || (historyLoadFailed && historyData)
+              ? 'Showing the last successfully loaded attendance data. '
+              : ''}
+            Pull to refresh or retry.
+          </Text>
+          <Button label="Retry" size="sm" variant="secondary" fullWidth={false} onPress={onRefresh} />
+        </Card>
+      ) : null}
+
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
         subtitle={getFormattedDate()}
@@ -220,7 +244,7 @@ export default function HomeScreen() {
             {/* Contact HR / Help */}
             <TouchableOpacity
               style={styles.iconButton}
-              onPress={() => router.push('/enquiries' as any)}
+              onPress={() => router.push('/enquiries')}
               accessibilityLabel="Contact HR & Enquiries"
             >
               <HelpCircle size={18} color={colors.indigoSoft} strokeWidth={2} />
@@ -229,7 +253,7 @@ export default function HomeScreen() {
             {/* Announcements Bell */}
             <TouchableOpacity
               style={styles.iconButton}
-              onPress={() => router.push('/announcements' as any)}
+              onPress={() => router.push('/announcements')}
               accessibilityLabel="View Announcements"
             >
               <Bell size={18} color={colors.indigoSoft} strokeWidth={2} />
@@ -269,7 +293,9 @@ export default function HomeScreen() {
         <View style={styles.heroHeader}>
           <View style={styles.heroCopy}>
             <Text variant="caption" color={colors.muted}>
-              {record ? "Today's Attendance" : 'Today · Not Checked In'}
+              {todayLoadFailed && !todayData
+                ? "Today's attendance unavailable"
+                : record ? "Today's Attendance" : 'Today · Not Checked In'}
             </Text>
             <Text variant="title" style={styles.heroTitle}>
               {isCheckedIn
@@ -278,7 +304,9 @@ export default function HomeScreen() {
                   ? 'Shift completed'
                   : isWfhToday
                     ? 'Working from home'
-                    : 'Ready to punch in'}
+                    : todayLoadFailed && !todayData
+                      ? 'Status unavailable'
+                      : 'Ready to punch in'}
             </Text>
             {record?.checkInTime ? (
               <Text variant="small" color={colors.textSecondary}>
@@ -365,25 +393,25 @@ export default function HomeScreen() {
             icon={CheckCircle2}
             label="Present"
             tone="success"
-            value={presentCount}
+            value={historyLoadFailed && !historyData ? '—' : presentCount}
           />
           <StatTile
             icon={AlertCircle}
             label="Absent"
             tone="danger"
-            value={absentCount}
+            value={historyLoadFailed && !historyData ? '—' : absentCount}
           />
           <StatTile
             icon={Clock3}
             label="Late"
             tone="warning"
-            value={lateCount}
+            value={historyLoadFailed && !historyData ? '—' : lateCount}
           />
           <StatTile
             icon={House}
             label="WFH"
             tone="info"
-            value={wfhCount}
+            value={historyLoadFailed && !historyData ? '—' : wfhCount}
           />
         </View>
       </View>
@@ -393,7 +421,14 @@ export default function HomeScreen() {
         <View style={styles.chartHeader}>
           <Text variant="subheading">Month Attendance Mix</Text>
         </View>
-        {totalRecordedDays > 0 ? (
+        {historyLoadFailed && !historyData ? (
+          <View style={styles.emptyChart}>
+            <AlertCircle size={22} color={colors.warning} strokeWidth={1.6} />
+            <Text variant="small" color={colors.muted} align="center">
+              Attendance statistics are unavailable until the service responds.
+            </Text>
+          </View>
+        ) : totalRecordedDays > 0 ? (
           <View style={styles.donutRow}>
             <DonutChart
               centerLabel="total days"
@@ -460,9 +495,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(89, 101, 242, 0.12)',
+    backgroundColor: 'rgba(20, 127, 181, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.22)',
+    borderColor: 'rgba(20, 127, 181, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -509,7 +544,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: 'rgba(11, 14, 25, 0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(184, 190, 255, 0.08)',
+    borderColor: 'rgba(184, 204, 214, 0.08)',
   },
   timeCell: {
     flex: 1,
@@ -534,7 +569,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 6,
-    backgroundColor: 'rgba(89, 101, 242, 0.1)',
+    backgroundColor: 'rgba(20, 127, 181, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },

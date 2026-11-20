@@ -327,20 +327,15 @@ describe("HR & Admin Authentication & Session Management", () => {
     });
   });
 
-  it("seed script creates demo admin, demo hr, and 25 employees across departments", async () => {
+  it("seed script creates employee demo data without creating privileged accounts", async () => {
     await runSeed();
 
-    const adminUser = await User.findOne({ employeeId: "ADM-001" });
-    expect(adminUser).not.toBeNull();
-    expect(adminUser?.role).toBe(UserRole.ADMIN);
-
-    const hrUser = await User.findOne({ employeeId: "HR-001" });
-    expect(hrUser).not.toBeNull();
-    expect(hrUser?.role).toBe(UserRole.HR);
+    expect(await User.findOne({ employeeId: "ADM-001" })).toBeNull();
+    expect(await User.findOne({ employeeId: "HR-001" })).toBeNull();
 
     const employeeCount = await Employee.countDocuments();
-    // 25 employees + 1 admin employee + 1 hr employee = 27 total
-    expect(employeeCount).toBeGreaterThanOrEqual(27);
+    // 25 demo employees plus one unlinked OTP registration roster record.
+    expect(employeeCount).toBeGreaterThanOrEqual(26);
 
     // Verify departments represented
     const departments = await Employee.distinct("department");
@@ -353,6 +348,42 @@ describe("HR & Admin Authentication & Session Management", () => {
         "Operations",
       ])
     );
+  });
+
+  it("seed script does not change existing Admin or HR accounts", async () => {
+    const adminPasswordHash = await hashPassword("ExistingAdminPassword123!");
+    const hrPasswordHash = await hashPassword("ExistingHrPassword123!");
+    await User.create({
+      employeeId: "ADM-001",
+      email: "admin@vorldx.demo",
+      passwordHash: adminPasswordHash,
+      role: UserRole.ADMIN,
+      status: "ACTIVE",
+      isEmailVerified: true,
+    });
+    await User.create({
+      employeeId: "HR-001",
+      email: "hr@vorldx.demo",
+      passwordHash: hrPasswordHash,
+      role: UserRole.HR,
+      status: "INACTIVE",
+      isEmailVerified: false,
+    });
+
+    await runSeed();
+
+    expect(await User.findOne({ employeeId: "ADM-001" })).toMatchObject({
+      passwordHash: adminPasswordHash,
+      role: UserRole.ADMIN,
+      status: "ACTIVE",
+      isEmailVerified: true,
+    });
+    expect(await User.findOne({ employeeId: "HR-001" })).toMatchObject({
+      passwordHash: hrPasswordHash,
+      role: UserRole.HR,
+      status: "INACTIVE",
+      isEmailVerified: false,
+    });
   });
 
   it("refuses to seed database when NODE_ENV is production and demo passwords are used", async () => {

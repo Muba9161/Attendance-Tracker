@@ -7,6 +7,7 @@ import {
   ScrollView,
 } from 'react-native';
 import {
+  AlertCircle,
   CalendarDays,
   Palmtree,
   Calendar as CalendarIcon,
@@ -29,12 +30,14 @@ import {
   Screen,
   ScreenHeader,
   Card,
+  Button,
   Text,
   PressableScale,
   Skeleton,
 } from '../src/components';
 import { colors, radii, spacing } from '../src/theme/tokens';
 import { useResponsive } from '../src/lib/responsive';
+import { getCalendarDateKey, getLocalDateKey } from '../src/lib/date';
 import { holidayApi } from '../src/services';
 
 // ---------------------------------------------------------------------------
@@ -89,9 +92,9 @@ export const EVENT_CATEGORY_CONFIG: Record<
     badgeLabel: 'PUBLIC HOLIDAY',
     icon: Landmark,
     color: colors.indigoSoft, // #7E8BFF
-    bgSoft: 'rgba(89, 101, 242, 0.16)',
-    borderColor: 'rgba(89, 101, 242, 0.35)',
-    dotColor: '#5965F2',
+    bgSoft: 'rgba(20, 127, 181, 0.16)',
+    borderColor: 'rgba(20, 127, 181, 0.35)',
+    dotColor: '#147FB5',
   },
   companyOffDay: {
     label: 'Company Off-Day',
@@ -106,19 +109,19 @@ export const EVENT_CATEGORY_CONFIG: Record<
     label: 'Hackathon / Session',
     badgeLabel: 'TECH SESSION & HACKATHON',
     icon: Code2,
-    color: colors.info, // #76B8FF
-    bgSoft: 'rgba(118, 184, 255, 0.16)',
-    borderColor: 'rgba(118, 184, 255, 0.35)',
-    dotColor: '#76B8FF',
+    color: colors.info, // #147FB5
+    bgSoft: 'rgba(20, 127, 181, 0.16)',
+    borderColor: 'rgba(20, 127, 181, 0.35)',
+    dotColor: '#147FB5',
   },
   meeting: {
     label: 'Town Hall & Sync',
     badgeLabel: 'TOWN HALL & ALL-HANDS',
     icon: Users,
-    color: colors.leave, // #C4A7FF
-    bgSoft: 'rgba(196, 167, 255, 0.16)',
-    borderColor: 'rgba(196, 167, 255, 0.35)',
-    dotColor: '#C4A7FF',
+    color: colors.leave, // #32BDA8
+    bgSoft: 'rgba(50, 189, 168, 0.16)',
+    borderColor: 'rgba(50, 189, 168, 0.35)',
+    dotColor: '#32BDA8',
   },
 };
 
@@ -628,12 +631,13 @@ export default function HolidaysScreen() {
 
   const [currentMonth, setCurrentMonth] = useState<Date>(() => new Date());
   const [selectedDateKey, setSelectedDateKey] = useState<string>(() => {
-    return new Date().toISOString().split('T')[0];
+    return getLocalDateKey();
   });
 
   const [events, setEvents] = useState<UnifiedCalendarEvent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
 
   const activeYear = currentMonth.getFullYear();
 
@@ -641,6 +645,7 @@ export default function HolidaysScreen() {
   const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
+      setCalendarError(null);
       const [eventsRes, holRes] = await Promise.allSettled([
         holidayApi.getCalendarEvents(activeYear),
         holidayApi.getHolidays(activeYear),
@@ -652,8 +657,8 @@ export default function HolidaysScreen() {
       // 1. Process calendar events from /api/calendar/events (exact same source as web CalendarPage)
       if (eventsRes.status === 'fulfilled' && eventsRes.value?.success && Array.isArray(eventsRes.value.data)) {
         for (const evt of eventsRes.value.data) {
-          const sKey = new Date(evt.startDate).toISOString().split('T')[0];
-          const eKey = new Date(evt.endDate).toISOString().split('T')[0];
+          const sKey = getCalendarDateKey(evt.startDate);
+          const eKey = getCalendarDateKey(evt.endDate);
 
           let curr = sKey;
           let count = 0;
@@ -685,7 +690,7 @@ export default function HolidaysScreen() {
 
             const [y, m, d] = curr.split('-').map(Number);
             const nextDate = new Date(Date.UTC(y, m - 1, d + 1));
-            curr = nextDate.toISOString().split('T')[0];
+            curr = nextDate.toISOString().slice(0, 10);
             count++;
           }
         }
@@ -711,15 +716,14 @@ export default function HolidaysScreen() {
         }
       }
 
-      // If backend returned data, use PURELY backend data (exact 1:1 match with web!)
-      if (backendEvents.length > 0) {
-        setEvents(backendEvents);
-      } else {
-        // Fallback to comprehensive corporate calendar
-        setEvents(MASTER_CORPORATE_CALENDAR_2026);
-      }
+      const eventsOk = eventsRes.status === 'fulfilled' && eventsRes.value?.success && Array.isArray(eventsRes.value.data);
+      const holidaysOk = holRes.status === 'fulfilled' && holRes.value?.success && Array.isArray(holRes.value.data);
+      setEvents(backendEvents);
+      if (!eventsOk && !holidaysOk) setCalendarError('Calendar data could not be loaded. Check your connection and retry.');
+      else if (!eventsOk || !holidaysOk) setCalendarError('Some calendar data could not be loaded. Retry to refresh it.');
     } catch {
-      setEvents(MASTER_CORPORATE_CALENDAR_2026);
+      setEvents([]);
+      setCalendarError('Calendar data could not be loaded. Check your connection and retry.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -825,7 +829,7 @@ export default function HolidaysScreen() {
   const monthData = useMemo(() => {
     const year = currentMonth.getFullYear();
     const monthIdx = currentMonth.getMonth();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateKey();
 
     const firstDayOfWeek = new Date(year, monthIdx, 1).getDay();
     const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
@@ -964,7 +968,7 @@ export default function HolidaysScreen() {
     void Haptics.selectionAsync().catch(() => undefined);
     const today = new Date();
     setCurrentMonth(today);
-    setSelectedDateKey(today.toISOString().split('T')[0]);
+    setSelectedDateKey(getLocalDateKey(today));
   };
 
   const monthLabel = currentMonth.toLocaleDateString(undefined, {
@@ -1322,21 +1326,21 @@ export default function HolidaysScreen() {
               {/* Legend Row (Reference from Web) */}
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#5965F2' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: '#147FB5' }]} />
                   <Text variant="caption" color={colors.indigoSoft}>
                     Holiday
                   </Text>
                 </View>
 
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#76B8FF' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: '#147FB5' }]} />
                   <Text variant="caption" color={colors.info}>
                     Hackathon
                   </Text>
                 </View>
 
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#C4A7FF' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: '#32BDA8' }]} />
                   <Text variant="caption" color={colors.leave}>
                     Town Hall
                   </Text>
@@ -1476,9 +1480,13 @@ export default function HolidaysScreen() {
               </View>
             ) : (
               <Card variant="glass" padding={16} style={styles.emptySelectedDateCard}>
-                <CalendarIcon size={18} color={colors.muted} strokeWidth={1.8} />
-                <Text variant="caption" color={colors.muted}>
-                  No {categoryFilter === 'all' ? 'events or holidays' : categoryFilter === 'holiday' ? 'holidays' : categoryFilter === 'event' ? 'sessions' : 'town halls'} scheduled for {new Date(selectedDateKey + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.
+                <CalendarIcon size={18} color={calendarError ? colors.warning : colors.muted} strokeWidth={1.8} />
+                <Text variant="caption" color={calendarError ? colors.warning : colors.muted}>
+                  {calendarError
+                    ? 'Calendar data is unavailable; retry to check this date.'
+                    : loading
+                      ? 'Loading calendar data…'
+                      : `No ${categoryFilter === 'all' ? 'events or holidays' : categoryFilter === 'holiday' ? 'holidays' : categoryFilter === 'event' ? 'sessions' : 'town halls'} scheduled for ${new Date(selectedDateKey + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`}
                 </Text>
               </Card>
             )}
@@ -1489,11 +1497,19 @@ export default function HolidaysScreen() {
                 Schedule in {currentMonth.toLocaleDateString(undefined, { month: 'long' })}
               </Text>
               <Text variant="caption" color={colors.muted}>
-                {currentMonthEvents.length} items
+                {calendarError ? 'Calendar unavailable' : `${currentMonthEvents.length} items`}
               </Text>
             </View>
 
-            {currentMonthEvents.length === 0 ? (
+            {calendarError ? (
+              <Card variant="glass" padding={20} style={styles.emptyMonthCard}>
+                <AlertCircle size={24} color={colors.warning} strokeWidth={1.8} />
+                <Text variant="small" color={colors.warning} align="center">{calendarError}</Text>
+                <Button label="Retry" size="sm" variant="secondary" fullWidth={false} onPress={onRefresh} />
+              </Card>
+            ) : loading ? (
+              <View style={styles.skeletonItem}><Skeleton style={styles.skeletonItem} /></View>
+            ) : currentMonthEvents.length === 0 ? (
               <Card variant="glass" padding={20} style={styles.emptyMonthCard}>
                 <Coffee size={24} color={colors.muted} strokeWidth={1.8} />
                 <Text variant="small" color={colors.muted} align="center">
@@ -1622,6 +1638,13 @@ export default function HolidaysScreen() {
                 <Skeleton style={styles.skeletonItem} />
                 <Skeleton style={styles.skeletonItem} />
               </View>
+            ) : calendarError ? (
+              <Card variant="glass" padding={32} style={styles.emptyCard}>
+                <AlertCircle size={36} color={colors.warning} strokeWidth={1.5} />
+                <Text variant="subheading" color={colors.text} style={styles.emptyTitle}>Calendar unavailable</Text>
+                <Text variant="caption" color={colors.muted} style={styles.emptyDesc}>{calendarError}</Text>
+                <Button label="Retry" size="sm" variant="secondary" fullWidth={false} onPress={onRefresh} />
+              </Card>
             ) : displayedListEvents.length === 0 ? (
               <Card variant="glass" padding={32} style={styles.emptyCard}>
                 <CalendarDays size={40} color={colors.muted} strokeWidth={1.5} />
@@ -1812,12 +1835,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(89, 101, 242, 0.12)',
+    backgroundColor: 'rgba(20, 127, 181, 0.12)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: radii.full,
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.25)',
+    borderColor: 'rgba(20, 127, 181, 0.25)',
   },
 
   // Category Filter Pills (Option 5)
@@ -1865,9 +1888,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
   },
   viewModeTabActive: {
-    backgroundColor: 'rgba(89, 101, 242, 0.28)',
+    backgroundColor: 'rgba(20, 127, 181, 0.28)',
     borderWidth: 1,
-    borderColor: 'rgba(89, 101, 242, 0.45)',
+    borderColor: 'rgba(20, 127, 181, 0.45)',
   },
 
   // Month Metrics Row
@@ -1888,16 +1911,16 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   metricChipHolidays: {
-    backgroundColor: 'rgba(89, 101, 242, 0.12)',
-    borderColor: 'rgba(89, 101, 242, 0.3)',
+    backgroundColor: 'rgba(20, 127, 181, 0.12)',
+    borderColor: 'rgba(20, 127, 181, 0.3)',
   },
   metricChipSessions: {
-    backgroundColor: 'rgba(118, 184, 255, 0.12)',
-    borderColor: 'rgba(118, 184, 255, 0.3)',
+    backgroundColor: 'rgba(20, 127, 181, 0.12)',
+    borderColor: 'rgba(20, 127, 181, 0.3)',
   },
   metricChipTownHalls: {
-    backgroundColor: 'rgba(196, 167, 255, 0.12)',
-    borderColor: 'rgba(196, 167, 255, 0.3)',
+    backgroundColor: 'rgba(50, 189, 168, 0.12)',
+    borderColor: 'rgba(50, 189, 168, 0.3)',
   },
 
   // Calendar Card
@@ -1925,7 +1948,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   todayPill: {
-    backgroundColor: 'rgba(89, 101, 242, 0.15)',
+    backgroundColor: 'rgba(20, 127, 181, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: radii.full,
@@ -2092,7 +2115,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(118, 184, 255, 0.1)',
+    backgroundColor: 'rgba(20, 127, 181, 0.1)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: radii.full,
@@ -2130,8 +2153,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   monthHolidayItemSelected: {
-    backgroundColor: 'rgba(89, 101, 242, 0.1)',
-    borderColor: 'rgba(89, 101, 242, 0.4)',
+    backgroundColor: 'rgba(20, 127, 181, 0.1)',
+    borderColor: 'rgba(20, 127, 181, 0.4)',
   },
   monthHolidayDateBox: {
     width: 44,
@@ -2191,7 +2214,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
   },
   holidayCardNext: {
-    borderColor: 'rgba(89, 101, 242, 0.45)',
+    borderColor: 'rgba(20, 127, 181, 0.45)',
     borderWidth: 1,
   },
   holidayCardPast: {
@@ -2298,7 +2321,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52, 211, 153, 0.15)',
   },
   statusTomorrow: {
-    backgroundColor: 'rgba(89, 101, 242, 0.18)',
+    backgroundColor: 'rgba(20, 127, 181, 0.18)',
   },
   statusPast: {
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
